@@ -858,9 +858,9 @@ async function submitOrder() {
 // ==========================================================
 
 // ---- Floor configuration (تغییر تعداد میزها فقط همینجا) ----
-const FLOOR_TOTAL_TABLES     = 64;
-const FLOOR_TWO_SEATER_START = 55;   // tableIndex >= این عدد => میز دو نفره (T55..T64)
-const FLOOR_COLS             = 8;    // چیدمان ۸ ستونی
+const FLOOR_TOTAL_TABLES     = 4;    // تعداد میزها کاهش یافت به 4 میز
+const FLOOR_TWO_SEATER_START = 999;  // همه میزها 4 نفره (هیچ میز دو نفره‌ای نداریم)
+const FLOOR_COLS             = 2;    // چیدمان 2 ستونی (2x2)
 
 // فاصله‌ی صندلی از مرکز میز (px)
 const CHAIR_OFFSETS_4 = [ // میز ۴ نفره
