@@ -143,7 +143,7 @@ function handleServerEvent(data) {
     if (data.event === "snapshot") {
         const seen = new Set();
         (data.orders || []).forEach(order => {
-            if (["new", "cooking", "awaiting_confirmation"].includes(order.status)) {
+            if (isBoardStatus(order.status)) {
                 seen.add(order.id);
                 upsertOrder(order);
             }
@@ -164,7 +164,7 @@ function handleServerEvent(data) {
 
     if (data.event === "order_updated") {
         const order = data.order;
-        if (["new", "cooking", "awaiting_confirmation"].includes(order.status)) {
+        if (isBoardStatus(order.status)) {
             upsertOrder(order);
         } else {
             removeOrder(order.id);
@@ -196,9 +196,28 @@ function beep() {
 // ===============================
 // Rendering — only the affected card is touched, never a full re-render
 // ===============================
+// وضعیت‌هایی که روی برد آشپزخانه دیده می‌شوند.
+// new → cooking → ready → sent → awaiting_confirmation
+// هر وضعیت ستون خودش را دارد: «آمادهٔ ارسال» و «ارسال‌شده» جدا هستند.
+const BOARD_STATUSES = ["new", "cooking", "ready", "sent", "awaiting_confirmation"];
+
+function isBoardStatus(status) {
+    return BOARD_STATUSES.includes(status);
+}
+
+function cardSkin(status) {
+    if (status === "new") return "new";
+    if (status === "cooking") return "cooking";
+    if (status === "ready") return "ready";
+    if (status === "sent") return "sent";
+    return "waiting";
+}
+
 function columnForStatus(status) {
     if (status === "new") return document.getElementById("colNew");
     if (status === "cooking") return document.getElementById("colCooking");
+    if (status === "ready") return document.getElementById("colReady");
+    if (status === "sent") return document.getElementById("colSent");
     if (status === "awaiting_confirmation") return document.getElementById("colWaiting");
     return null;
 }
@@ -239,14 +258,20 @@ function removeOrder(id) {
 }
 
 function refreshCounts() {
-    ["new", "cooking", "waiting"].forEach(key => {
+    ["new", "cooking", "ready", "sent", "waiting"].forEach(key => {
         const col = document.getElementById("col" + key.charAt(0).toUpperCase() + key.slice(1));
         const countEl = document.getElementById("count" + key.charAt(0).toUpperCase() + key.slice(1));
         if (!col || !countEl) return;
         const count = col.querySelectorAll(".order-card").length;
         countEl.textContent = count;
         if (count === 0 && !col.querySelector(".kh-empty")) {
-            const emptyText = { new: "سفارش جدیدی نیست", cooking: "چیزی در حال پخت نیست", waiting: "سفارشی منتظر تأیید نیست" }[key];
+            const emptyText = {
+                new: "سفارش جدیدی نیست",
+                cooking: "چیزی در حال پخت نیست",
+                ready: "سفارشی آمادهٔ ارسال نیست",
+                sent: "سفارشی در مسیر ارسال نیست",
+                waiting: "سفارشی منتظر تأیید نیست"
+            }[key];
             col.innerHTML = `<div class="kh-empty">${emptyText}</div>`;
         }
     });
@@ -271,14 +296,14 @@ function formatMMSS(seconds) {
 function buildOrderCard(order) {
     const card = document.createElement("div");
     card.id = "order-" + order.id;
-    card.className = "order-card " + (order.status === "new" ? "new" : order.status === "cooking" ? "cooking" : "waiting");
+    card.className = "order-card " + cardSkin(order.status);
     card.dataset.orderId = order.id;
     fillCardContent(card, order);
     return card;
 }
 
 function updateOrderCard(card, order) {
-    card.className = "order-card " + (order.status === "new" ? "new" : order.status === "cooking" ? "cooking" : "waiting")
+    card.className = "order-card " + cardSkin(order.status)
         + (order.status === "awaiting_confirmation" && order.customer_confirmed === false ? " alert" : "");
     fillCardContent(card, order);
 }
@@ -313,6 +338,35 @@ function fillCardContent(card, order) {
                 <span class="timer-digits mono" id="timer-${order.id}" data-eta="${order.eta_at || ""}">${formatMMSS(remaining)}</span>
                 <button class="timer-btn" onclick="adjustTimer(${order.id}, 5)">+5</button>
             </div>
+            <div class="oc-actions">
+                <button class="btn-huge btn-dispatch" onclick="markOrderReady(${order.id})"><i class="bi bi-check2-circle"></i> آماده شد</button>
+            </div>
+        `;
+        return;
+    }
+
+    if (order.status === "ready") {
+        card.innerHTML = `
+            <div class="oc-head"><span class="oc-id">سفارش #${order.id}</span><span class="oc-badge ready">آماده تحویل</span></div>
+            <div class="oc-table"><i class="bi bi-grid-3x3-gap-fill"></i>میز ${order.table}</div>
+            ${nameLine}
+            <div class="oc-items">${itemsHtml(order)}</div>
+            <div class="oc-total">${Number(order.total).toLocaleString()} تومان</div>
+            <div class="dispatch-msg"><i class="bi bi-check2-circle"></i> غذا آماده است — هنوز تحویل نشده</div>
+            <div class="oc-actions">
+                <button class="btn-huge btn-dispatch" onclick="sendToRobot(${order.id})"><i class="bi bi-robot"></i> ارسال با ربات</button>
+            </div>
+        `;
+        return;
+    }
+
+    if (order.status === "sent") {
+        card.innerHTML = `
+            <div class="oc-head"><span class="oc-id">سفارش #${order.id}</span><span class="oc-badge sent">ارسال‌شده</span></div>
+            <div class="oc-table"><i class="bi bi-grid-3x3-gap-fill"></i>میز ${order.table}</div>
+            ${nameLine}
+            <div class="oc-items">${itemsHtml(order)}</div>
+            <div class="dispatch-msg"><i class="bi bi-robot"></i> ربات در مسیر میز ${order.table} — منتظر تأیید تحویل</div>
         `;
         return;
     }
@@ -368,6 +422,9 @@ async function postAction(url, body) {
         const data = await res.json();
         if (!data.success) {
             showToast(data.error || "عملیات انجام نشد.", "error");
+        } else {
+            // بازخورد موفقیت فقط پس از تأیید سرور (نه روی خوش‌بینی)
+            showToast(data.message || "وضعیت سفارش به‌روزرسانی شد.", "success");
         }
         return data;
     } catch (e) {
@@ -383,6 +440,12 @@ function rejectOrder(id) {
     postAction(`/api/orders/${id}/reject/`);
 }
 function adjustTimer(id, deltaMinutes) { postAction(`/api/orders/${id}/timer/`, { delta_minutes: deltaMinutes }); }
+
+// غذا آماده شد (تحویل نشده) → ستون «آماده / در حال ارسال»
+function markOrderReady(id) { postAction(`/api/orders/${id}/ready/`); }
+
+// ارسال با ربات → وضعیت sent (هنوز تحویل‌شده محسوب نمی‌شود)
+function sendToRobot(id) { postAction(`/api/orders/${id}/send/`); }
 function resolveIssue(id, action) { postAction(`/api/orders/${id}/resolve/`, { action: action }); }
 
 // ===============================
