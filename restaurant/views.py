@@ -1353,6 +1353,12 @@ def create_order(request):
 
 def check_customer_phone(request):
 
+    # محدودیت نرخ برای جلوگیری از حدس‌زدن تعداد lớn شماره‌های تلفن
+    # و افشای نام مشتریان ثبت‌شده.
+    ip = _client_ip(request)
+    if rate_limited("check-customer-phone", ip, limit=30, window=60):
+        return _rate_limited_response()
+
     phone = (request.GET.get("phone") or "").strip()
 
     if not phone:
