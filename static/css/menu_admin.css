@@ -1,0 +1,391 @@
+/* ===============================================
+   مدیریت منو — روی توکن‌های Dashboard.css سوار می‌شود
+   =============================================== */
+
+.mm-wrap {
+  max-width: 1180px; margin: 0 auto; padding: 20px;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px; align-items: start;
+}
+@media (max-width: 900px) { .mm-wrap { grid-template-columns: 1fr; padding: 14px; gap: 14px; } }
+
+.mm-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 20px; min-width: 0;
+}
+
+.mm-title {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 1.15rem; font-weight: 800; margin: 0 0 18px;
+}
+.mm-title i { color: var(--blue); }
+.mm-total {
+  margin-right: auto; background: var(--bg); color: var(--muted);
+  border-radius: 999px; font-size: .9rem; font-weight: 800; padding: 2px 12px;
+}
+
+.mm-form { display: flex; flex-direction: column; gap: 16px; }
+
+.mm-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mm-field > label { font-weight: 700; font-size: .95rem; }
+.mm-req { color: var(--red); }
+.mm-opt { color: var(--muted); font-weight: 600; font-size: .85rem; }
+
+.mm-field input[type="text"],
+.mm-field input[type="file"],
+.mm-field select,
+.mm-field textarea {
+  width: 100%; box-sizing: border-box;
+  padding: 11px 14px; font: inherit; font-size: 16px;
+  color: var(--ink); background: #fff;
+  border: 1px solid var(--border); border-radius: 12px;
+  min-height: 44px;
+}
+.mm-field textarea { resize: vertical; }
+.mm-field select { cursor: pointer; }
+.mm-field input:focus-visible,
+.mm-field select:focus-visible,
+.mm-field textarea:focus-visible {
+  outline: 2px solid var(--blue); outline-offset: 1px; border-color: var(--blue);
+}
+.mm-field input[aria-invalid="true"],
+.mm-field select[aria-invalid="true"],
+.mm-field textarea[aria-invalid="true"] { border-color: var(--red); }
+
+.mm-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 520px) { .mm-row2 { grid-template-columns: 1fr; } }
+
+.mm-hint { margin: 0; color: var(--muted); font-size: .82rem; }
+.mm-error { margin: 0; color: var(--red); font-size: .85rem; font-weight: 700; min-height: 0; }
+.mm-error:empty { display: none; }
+
+.mm-newcat { margin-top: 6px; }
+.mm-newcat summary {
+  cursor: pointer; color: var(--blue); font-weight: 700; font-size: .9rem;
+}
+.mm-newcat-body { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mm-newcat-body input {
+  flex: 1 1 140px; min-width: 0; padding: 10px 12px; font: inherit; font-size: 15px;
+  border: 1px solid var(--border); border-radius: 10px; min-height: 44px;
+}
+
+.mm-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 18px; min-height: 44px;
+  border: none; border-radius: 12px; cursor: pointer;
+  font: inherit; font-weight: 800; font-size: 1rem; transition: .15s;
+}
+.mm-btn:active { transform: scale(.98); }
+.mm-btn:disabled { opacity: .6; cursor: progress; }
+.mm-btn-primary { background: var(--green); color: #fff; width: 100%; }
+.mm-btn-primary:hover:not(:disabled) { background: #128a3e; }
+.mm-btn-ghost { background: var(--bg); color: var(--ink); border: 1px solid var(--border); }
+.mm-btn-ghost:hover:not(:disabled) { background: #e9eef5; }
+
+.mm-actions { position: sticky; bottom: 0; padding-top: 4px; }
+
+.mm-msg {
+  margin: 4px 0 0; padding: 12px 16px; border-radius: 12px;
+  font-weight: 700; font-size: .92rem; line-height: 1.8;
+}
+.mm-msg.success { background: var(--green-bg); color: var(--green); }
+.mm-msg.error { background: var(--red-bg); color: var(--red); }
+.mm-msg.info { background: var(--blue-bg); color: var(--blue); }
+.mm-msg a { color: inherit; text-decoration: underline; }
+
+.mm-preview { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.mm-preview img {
+  width: 84px; height: 84px; object-fit: cover;
+  border-radius: 12px; border: 1px solid var(--border); background: var(--bg);
+}
+
+/* ---------- list ---------- */
+.mm-group { margin-bottom: 22px; }
+.mm-group h3 {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 1rem; font-weight: 800; margin: 0 0 10px; color: var(--muted);
+}
+.mm-count {
+  background: var(--bg); color: var(--muted); border-radius: 999px;
+  font-size: .8rem; padding: 1px 9px; font-family: 'JetBrains Mono', monospace;
+}
+.mm-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+
+.mm-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto auto;
+  align-items: center; gap: 12px;
+  padding: 10px; border: 1px solid var(--border); border-radius: 14px;
+  animation: mmIn .25s ease;
+}
+@keyframes mmIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@media (max-width: 520px) {
+  .mm-row { grid-template-columns: 44px minmax(0, 1fr) auto; grid-template-areas: "thumb info badge" "thumb price badge"; }
+  .mm-thumb { grid-area: thumb; }
+  .mm-info { grid-area: info; }
+  .mm-price { grid-area: price; }
+  .mm-badge { grid-area: badge; }
+}
+
+.mm-thumb {
+  width: 52px; height: 52px; border-radius: 12px; overflow: hidden;
+  background: var(--bg); display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; color: var(--muted);
+}
+.mm-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+.mm-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mm-info strong { font-size: .98rem; font-weight: 800; }
+.mm-info small { color: var(--muted); font-size: .8rem; }
+.mm-price { font-weight: 800; font-size: .9rem; white-space: nowrap; }
+
+.mm-badge { font-size: .75rem; font-weight: 800; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.mm-badge.in { background: var(--green-bg); color: var(--green); }
+.mm-badge.out { background: var(--red-bg); color: var(--red); }
+
+.mm-empty {
+  color: var(--muted); text-align: center; padding: 30px 12px;
+  border: 1px dashed var(--border); border-radius: 14px; margin: 0;
+}
+
+
+/* ---------- editing a dish ---------- */
+
+.mm-actions { display: flex; gap: 10px; }
+.mm-actions .mm-btn-primary { flex: 1; }
+
+.mm-edit-chip {
+  margin-right: auto; background: var(--blue-bg); color: var(--blue);
+  border-radius: 999px; font-size: .78rem; font-weight: 800; padding: 3px 10px;
+}
+
+.mm-edit-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 11px; min-height: 36px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: #fff; color: var(--blue);
+  font: inherit; font-size: .82rem; font-weight: 800; cursor: pointer;
+  transition: .15s;
+}
+.mm-edit-btn:hover:not(:disabled) { background: var(--blue-bg); border-color: var(--blue); }
+.mm-edit-btn:disabled { opacity: .45; cursor: default; }
+.mm-edit-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+.mm-row { grid-template-columns: 52px minmax(0, 1fr) auto auto auto; }
+.mm-row.editing {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue-bg);
+}
+.mm-row.flash { animation: mmFlash 1.4s ease; }
+@keyframes mmFlash {
+  0% { background: var(--green-bg); }
+  100% { background: transparent; }
+}
+
+.mm-error-summary {
+  background: var(--red-bg); color: var(--red);
+  border-radius: 12px; padding: 10px 14px;
+  font-size: .88rem; font-weight: 700;
+}
+.mm-error-summary ul { margin: 6px 0 0; padding-inline-start: 18px; }
+.mm-error-summary a { color: inherit; }
+
+.mm-confirm {
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--bg); padding: 12px 14px;
+}
+.mm-confirm p { margin: 0 0 10px; font-weight: 700; font-size: .9rem; }
+.mm-confirm-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mm-confirm-actions .mm-btn { padding: 9px 14px; font-size: .88rem; }
+
+@media (max-width: 520px) {
+  .mm-row {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "thumb info badge"
+      "thumb price edit";
+    row-gap: 8px;
+  }
+  .mm-thumb { grid-area: thumb; }
+  .mm-info { grid-area: info; }
+  .mm-price { grid-area: price; }
+  .mm-badge { grid-area: badge; }
+  .mm-edit-btn { grid-area: edit; justify-self: end; }
+}
+
+/* در حالت ویرایش فقط قیمت می‌ماند؛ دو ستون به یک ستون تبدیل می‌شود */
+.mm-form.editing .mm-row2 { grid-template-columns: 1fr; }
+.mm-form.editing .mm-add-only { display: none; }
+
+
+/* ---------- row actions: availability / delete ---------- */
+
+.mm-row { grid-template-columns: 52px minmax(0, 1fr) auto auto auto; }
+
+.mm-row-actions { display: flex; align-items: center; gap: 6px; }
+.mm-row.confirming .mm-row-actions { display: none; }
+
+.mm-del-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: #fff; color: var(--red); font-size: 1rem; cursor: pointer;
+  transition: .15s;
+}
+.mm-del-btn:hover:not(:disabled) { background: var(--red-bg); border-color: var(--red); }
+.mm-del-btn:disabled { opacity: .45; cursor: default; }
+.mm-del-btn:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
+
+.mm-switch {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 36px; padding: 0;
+  background: none; border: none; cursor: pointer;
+}
+.mm-switch-track {
+  width: 38px; height: 22px; border-radius: 999px;
+  background: var(--border); position: relative; transition: background .18s;
+  display: inline-block;
+}
+.mm-switch-thumb {
+  position: absolute; inset-inline-start: 3px; top: 3px;
+  width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .25); transition: transform .18s;
+}
+.mm-switch[aria-checked="true"] .mm-switch-track { background: var(--green); }
+.mm-switch[aria-checked="true"] .mm-switch-thumb { transform: translateX(-16px); }
+.mm-switch:disabled { opacity: .5; cursor: progress; }
+.mm-switch:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 999px; }
+
+.mm-confirm-strip {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  background: var(--red-bg); border: 1px solid #f5c2c2; border-radius: 12px;
+  padding: 10px 12px;
+  font-size: .88rem; font-weight: 700; color: var(--red);
+}
+.mm-btn-danger { background: var(--red); color: #fff; }
+.mm-btn-danger:hover:not(:disabled) { background: #b91c1c; }
+.mm-btn-danger, .mm-confirm-strip .mm-btn { padding: 8px 12px; font-size: .85rem; min-height: 36px; }
+
+/* ---------- categories card ---------- */
+
+.mm-cat-toggle { margin-bottom: 12px; }
+.mm-cat-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.mm-cat-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px;
+  font-weight: 700; font-size: .9rem;
+}
+
+/* ---------- پنل مدیریت منو داخل داشبورد ---------- */
+
+.kh-nav-link { border: 0; cursor: pointer; font-family: inherit; }
+
+body.mm-overlay-open { overflow: hidden; }
+
+.mm-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(15, 23, 42, .45);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 16px; overflow: auto;
+}
+.mm-overlay[hidden] { display: none; }
+
+.mm-overlay-inner {
+  background: var(--bg);
+  width: min(1180px, 100%);
+  max-height: calc(100vh - 32px);
+  display: flex; flex-direction: column; overflow: hidden;
+  border-radius: var(--radius);
+  box-shadow: 0 30px 70px -30px rgba(15, 23, 42, .5);
+}
+
+.mm-overlay-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px; background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+.mm-overlay-title { font-weight: 800; display: inline-flex; align-items: center; gap: 8px; }
+.mm-overlay-title i { color: var(--blue); }
+
+.mm-overlay-close {
+  margin-right: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; min-height: 40px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: #fff; color: var(--ink);
+  font: inherit; font-size: .88rem; font-weight: 700; cursor: pointer;
+}
+.mm-overlay-close:hover { background: var(--bg); }
+.mm-overlay-close:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+.mm-overlay-body { overflow: auto; }
+
+.mm-wrap--embedded { max-width: none; padding: 16px; }
+@media (max-width: 900px) {
+  .mm-wrap--embedded { grid-template-columns: 1fr; padding: 12px; }
+  .mm-overlay { padding: 8px; }
+  .mm-overlay-inner { max-height: calc(100vh - 16px); }
+}
+
+/* ---------- کلید فعال/غیرفعال بودن غذا (متفاوت از موجودی) ---------- */
+
+.mm-active-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 36px; padding: 0 10px;
+  border: 1px solid var(--blue); border-radius: 10px;
+  background: var(--blue-bg); color: var(--blue);
+  font: inherit; font-size: .78rem; font-weight: 800;
+  cursor: pointer; white-space: nowrap; transition: .15s;
+}
+.mm-active-pill:hover:not(:disabled) { filter: brightness(.97); }
+.mm-active-pill[aria-checked="false"] {
+  background: #fff; border-color: var(--border); color: var(--muted);
+}
+.mm-active-pill:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.mm-active-pill:disabled { opacity: .5; cursor: progress; }
+
+.mm-row.is-inactive .mm-info strong { color: var(--muted); }
+.mm-row.is-inactive .mm-price { color: var(--muted); }
+
+/* در عرض کم، متن وضعیت پنهان نمی‌شود؛ فقط فشرده‌تر می‌شود تا هم وضعیت
+   برای کاربر دیده شود و هم هدف لمسی کوچک‌تر از ۴۴px نشود. */
+@media (max-width: 640px) {
+  .mm-active-pill { padding: 0 7px; font-size: .72rem; min-width: 44px; }
+}
+
+/* فهرست غذاها با اضافه شدن کلید «در منو» چهار کنترل در هر ردیف دارد؛
+   در چیدمان دو ستونی جای کافی ندارد، پس تمام عرض می‌گیرد. */
+@media (min-width: 901px) {
+  .mm-wrap > .mm-card:nth-child(3) { grid-column: 1 / -1; }
+  /* فقط داخل لایهٔ داشبورد تک‌ستونی می‌شود؛ صفحهٔ مستقل همان دو ستون را دارد. */
+  .mm-overlay .mm-wrap { grid-template-columns: 1fr; }
+}
+
+/* نوار تأیید حذف با `display:flex` روی خصیصهٔ hidden غلبه می‌کرد؛
+   نتیجه: نوار «حذف شود؟» برای همهٔ ردیف‌ها باز دیده می‌شد. */
+.mm-confirm-strip[hidden],
+.mm-confirm[hidden] { display: none; }
+
+/* هر عنصر پنل که با [`hidden`] پنهان می‌شود باید واقعاً پنهان بماند؛
+   برخی قواعد `display` روی همان کلاس‌ها این خصیصه را خنثی می‌کردند
+   (نوار تأیید حذف و فرم «افزودن دسته» همیشه باز دیده می‌شدند). */
+.mm-wrap [hidden] { display: none; }
+
+/* ---------- ردیف غذا در گوشی: کلیدها یک سطر جدا می‌گیرند ---------- */
+@media (max-width: 520px) {
+  .mm-row {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "thumb info badge"
+      "thumb price badge"
+      "actions actions actions";
+    row-gap: 10px;
+  }
+  .mm-row-actions { grid-area: actions; justify-content: flex-end; flex-wrap: wrap; }
+  .mm-thumb { grid-area: thumb; }
+  .mm-info { grid-area: info; }
+  .mm-price { grid-area: price; }
+  .mm-badge { grid-area: badge; }
+}

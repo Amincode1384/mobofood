@@ -185,6 +185,41 @@ body{
 }
 .kh-nav-link:hover{background:#dbe8ff;}
 
+/* =============== مأموریت‌های ربات =============== */
+.mission-card{
+  background:var(--card);border:2px solid var(--border);border-radius:var(--radius);
+  padding:14px;box-shadow:var(--shadow);
+  animation:cardIn .35s ease;
+}
+.mission-card.pending{border-color:var(--amber);}
+.mission-card.assigned{border-color:var(--blue);}
+.mission-card.in_progress{border-color:var(--green);}
+.mission-card.completed{border-color:var(--muted);}
+.mission-card.failed{border-color:var(--red);}
+.mission-card.cancelled{border-color:var(--muted);opacity:.6;}
+
+.mc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.mc-code{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:1.2rem;color:var(--ink);direction:ltr;}
+.mc-badge{font-size:.72rem;font-weight:800;padding:3px 8px;border-radius:999px;}
+.mc-badge.pending{background:var(--amber-bg);color:var(--amber);}
+.mc-badge.assigned{background:var(--blue-bg);color:var(--blue);}
+.mc-badge.in_progress{background:var(--green-bg);color:var(--green);}
+.mc-badge.completed{background:var(--bg);color:var(--muted);}
+.mc-badge.failed{background:var(--red-bg);color:var(--red);}
+.mc-badge.cancelled{background:var(--bg);color:var(--muted);}
+
+.mc-dest{font-size:1.1rem;font-weight:700;margin:4px 0 8px;}
+.mc-dest i{color:var(--muted);margin-left:4px;direction:ltr;}
+.mc-order{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+.mc-order-label{font-size:.85rem;color:var(--muted);}
+.mc-order-id{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:.9rem;color:var(--ink);direction:ltr;}
+.mc-table{font-size:.85rem;color:var(--muted);margin-bottom:4px;}
+.mc-robot{font-size:.85rem;color:var(--blue);margin-bottom:4px;}
+.mc-robot i{margin-right:4px;}
+.mc-time{font-size:.75rem;color:var(--muted);margin-top:6px;border-top:1px solid var(--border);padding-top:6px;}
+
+.col-missions{color:var(--orange);}
+
 /* =============== HEADER — صفحه‌های کوچک =============== */
 @media (max-width: 560px) {
   .kh-header { padding: 12px 14px; gap: 10px; flex-wrap: wrap; }

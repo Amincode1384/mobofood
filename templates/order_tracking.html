@@ -595,147 +595,154 @@
         </div>
 
         <h5 class="timeline-title">روند سفارش</h5>
-        <div class="timeline">
-
-            <div class="status-item">
-                <div id="iconNew" class="status-icon status-done">✓</div>
-                <div class="status-content">
-                    <strong>سفارش ثبت شد</strong>
-                    <small>سفارش شما با موفقیت دریافت شد</small>
-                </div>
-            </div>
-
-            <div class="status-item">
-                <div id="iconAccepted" class="status-icon">2</div>
-                <div class="status-content">
-                    <strong>تایید سفارش</strong>
-                    <small>رستوران در حال بررسی سفارش است</small>
-                </div>
-            </div>
-
-            <div class="status-item">
-                <div id="iconCooking" class="status-icon">3</div>
-                <div class="status-content">
-                    <strong>آماده‌سازی غذا</strong>
-                    <small>آشپزخانه در حال آماده کردن غذاست</small>
-                </div>
-            </div>
-
-            <div class="status-item">
-                <div id="iconSent" class="status-icon">4</div>
-                <div class="status-content">
-                    <strong>ارسال با ربات</strong>
-                    <small>ربات سفارش شما را حمل می‌کند</small>
-                </div>
-            </div>
-
-            <div class="status-item">
-                <div id="iconDone" class="status-icon">5</div>
-                <div class="status-content">
-                    <strong>تحویل سفارش</strong>
-                    <small>سفارش به میز شما تحویل داده می‌شود</small>
-                </div>
-            </div>
-
-        </div>
+        <!-- مراحل از پاسخ API ساخته می‌شوند تا هرگز با وضعیت واقعی
+             Backend ناهماهنگ نباشند. -->
+        <div class="timeline" id="statusTimeline"></div>
 
     </div>
 </div>
 
 <script>
-const orderId = "{{ order.id|default:'123' }}"; // Added fallback for local testing
+const orderId = "{{ order.id|escapejs }}";
 
-async function updateOrderStatus() {
+// اعتبارنامهٔ پیگیری از حافظهٔ همین تب خوانده می‌شود (هرگز از URL).
+// اگر صفحه از مسیر عادی سفارش باز شده باشد، Session سمت سرور هم کافی است.
+function readStoredOrderToken(id) {
     try {
-        const response = await fetch(`/api/orders/${orderId}/`);
-        if (!response.ok) return;
-        const order = await response.json();
-        updateProgress(order.status);
-    } catch (error) {
-        console.error(error);
+        const list = JSON.parse(sessionStorage.getItem("orderHistory") || "[]");
+        const entry = list.find(function (o) { return String(o.id) === String(id); });
+        return entry && entry.token ? entry.token : null;
+    } catch (e) {
+        return null;
     }
 }
 
-function updateProgress(status) {
-    const steps = ["new", "accepted", "cooking", "sent", "done"];
-    const stepIcons = ["iconNew", "iconAccepted", "iconCooking", "iconSent", "iconDone"];
+const orderToken = readStoredOrderToken(orderId);
 
-    const rejectedBox = document.getElementById("rejectedBox");
-    const progressBar = document.getElementById("progressBar");
-    const statusText = document.getElementById("statusText");
-    const progressPercent = document.getElementById("progressPercent");
-    const waitingTime = document.getElementById("waitingTime");
+// ==========================
+// رندر مراحل — کاملاً از پاسخ API
+// ==========================
+function renderTimeline(steps, status) {
+    const timeline = document.getElementById("statusTimeline");
+    if (!timeline) return;
 
-    if (status === "rejected") {
-        if (rejectedBox) rejectedBox.classList.remove("d-none");
-        statusText.innerText = "سفارش رد شد";
-        statusText.style.color = "#dc3545";
-        progressPercent.innerText = "0%";
-        progressBar.style.width = "100%";
-        progressBar.classList.add("progress-rejected");
-        waitingTime.innerText = "لغو شده";
-        waitingTime.style.color = "#dc3545";
+    timeline.innerHTML = "";
 
-        stepIcons.forEach((iconId, i) => {
-            const icon = document.getElementById(iconId);
-            if (!icon) return;
-            icon.classList.remove("status-done", "status-active");
-            if (i === 0) {
-                icon.classList.add("status-done");
-                icon.innerText = "✓";
-            } else {
-                icon.classList.add("status-rejected");
-                icon.innerText = "×";
-            }
-        });
-        return;
-    }
+    // وضعیت ناشناخته/بدون مرحله → فقط پیام کلی وضعیت می‌ماند، بدون پیشرفت جعلی
+    if (!Array.isArray(steps) || steps.length === 0) return;
 
-    if (rejectedBox) rejectedBox.classList.add("d-none");
-    statusText.style.color = "#856404";
-    waitingTime.style.color = "#0d6efd";
-    progressBar.classList.remove("progress-rejected");
+    const cancelled = status === "rejected";
 
-    const index = steps.indexOf(status);
-    const currentIndex = index >= 0 ? index : 0;
+    steps.forEach(function (step, index) {
+        const item = document.createElement("div");
+        item.className = "status-item";
 
-    const percentages = { new: 20, accepted: 40, cooking: 60, sent: 80, done: 100 };
-    const texts = {
-        new: "در انتظار تایید",
-        accepted: "سفارش تایید شد",
-        cooking: "در حال پخت",
-        sent: "ربات در مسیر است",
-        done: "نوش جان!"
-    };
-    const times = {
-        new: "15 دقیقه",
-        accepted: "12 دقیقه",
-        cooking: "8 دقیقه",
-        sent: "3 دقیقه",
-        done: "تحویل شد"
-    };
+        const icon = document.createElement("div");
+        icon.className = "status-icon";
 
-    const percent = percentages[status] || 20;
-    statusText.innerText = texts[status] || texts.new;
-    progressPercent.innerText = percent + "%";
-    progressBar.style.width = percent + "%";
-    waitingTime.innerText = times[status] || times.new;
-
-    stepIcons.forEach((iconId, i) => {
-        const icon = document.getElementById(iconId);
-        if (!icon) return;
-        icon.classList.remove("status-done", "status-active", "status-rejected");
-        
-        if (i < currentIndex) {
+        if (cancelled) {
+            icon.classList.add(index === 0 ? "status-done" : "status-rejected");
+            icon.innerText = index === 0 ? "✓" : "×";
+        } else if (step.state === "done") {
             icon.classList.add("status-done");
             icon.innerText = "✓";
-        } else if (i === currentIndex) {
+        } else if (step.state === "current") {
             icon.classList.add("status-active");
-            icon.innerText = i + 1;
+            icon.innerText = String(index + 1);
         } else {
-            icon.innerText = i + 1;
+            icon.innerText = String(index + 1);
         }
+
+        const content = document.createElement("div");
+        content.className = "status-content";
+
+        const title = document.createElement("strong");
+        title.innerText = (cancelled && index > 0) ? "لغو شد" : (step.label || "");
+
+        const desc = document.createElement("small");
+        desc.innerText = (cancelled && index > 0) ? "" : (step.description || "");
+
+        content.appendChild(title);
+        content.appendChild(desc);
+
+        item.appendChild(icon);
+        item.appendChild(content);
+        timeline.appendChild(item);
     });
+}
+
+function formatRemaining(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(total / 60);
+    const rest = total % 60;
+    return String(minutes).padStart(2, "0") + ":" + String(rest).padStart(2, "0");
+}
+
+// ==========================
+// اعمال وضعیت واقعی روی صفحه
+// ==========================
+function applyOrder(order) {
+    const statusText = document.getElementById("statusText");
+    const progressBar = document.getElementById("progressBar");
+    const progressPercent = document.getElementById("progressPercent");
+    const waitingTime = document.getElementById("waitingTime");
+    const rejectedBox = document.getElementById("rejectedBox");
+
+    const status = order.status || "";
+    const cancelled = order.cancelled === true || status === "rejected";
+    const progress = Math.max(0, Math.min(100, Number(order.progress) || 0));
+
+    renderTimeline(order.steps, status);
+
+    if (statusText) {
+        statusText.innerText = order.status_label || "وضعیت سفارش در حال بررسی است";
+        statusText.style.color = cancelled ? "#dc3545" : "#856404";
+    }
+
+    if (progressPercent) progressPercent.innerText = progress + "%";
+    if (progressBar) {
+        progressBar.style.width = progress + "%";
+        progressBar.classList.toggle("progress-rejected", cancelled);
+    }
+
+    if (rejectedBox) rejectedBox.classList.toggle("d-none", !cancelled);
+
+    if (waitingTime) {
+        waitingTime.style.color = cancelled ? "#dc3545" : "#0d6efd";
+
+        if (cancelled) {
+            waitingTime.innerText = "لغو شده";
+        } else if (status === "done") {
+            waitingTime.innerText = "تحویل شد";
+        } else if (status === "awaiting_confirmation") {
+            waitingTime.innerText = "در انتظار تأیید شما";
+        } else if (status === "ready") {
+            waitingTime.innerText = "آماده تحویل";
+        } else if (status === "sent") {
+            waitingTime.innerText = "در مسیر میز شما";
+        } else if (status === "cooking" && order.remaining_seconds) {
+            waitingTime.innerText = formatRemaining(order.remaining_seconds);
+        } else if (status === "cooking") {
+            waitingTime.innerText = "در حال آماده‌سازی";
+        } else {
+            waitingTime.innerText = "به‌زودی";
+        }
+    }
+}
+
+async function updateOrderStatus() {
+    try {
+        const response = await fetch(`/api/orders/${orderId}/`, {
+            headers: orderToken ? { "X-Order-Token": orderToken } : {}
+        });
+
+        // شکست شبکه/عدم دسترسی نباید صفحه را خراب کند
+        if (!response.ok) return;
+
+        applyOrder(await response.json());
+    } catch (error) {
+        console.error("Order tracking error:", error);
+    }
 }
 
 updateOrderStatus();

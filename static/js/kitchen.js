@@ -20,6 +20,7 @@ const csrftoken = getCookie("csrftoken");
 
 // ---- state ----
 const orders = new Map(); // id -> order object (server shape from serialize_order)
+const missions = new Map(); // mission_uid -> mission object
 let ws = null;
 let wsAttempts = 0;
 let pollingFallback = null;
@@ -114,8 +115,9 @@ function scheduleReconnect() {
 function startPollingFallback() {
     if (pollingFallback) return;
     showToast("اتصال زنده برقرار نشد — حالت بروزرسانی دوره‌ای فعال شد.", "error");
-    pollingFallback = setInterval(loadOrdersViaRest, 4000);
+    pollingFallback = setInterval(() => { loadOrdersViaRest(); loadMissionsViaRest(); }, 4000);
     loadOrdersViaRest();
+    loadMissionsViaRest();
 }
 function stopPollingFallback() {
     if (!pollingFallback) return;
@@ -134,6 +136,19 @@ async function loadOrdersViaRest() {
     }
 }
 
+async function loadMissionsViaRest() {
+    try {
+        const res = await fetch("/api/missions/?status=assigned&status=in_progress&status=pending");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success) {
+            data.missions.forEach(m => upsertMission(m));
+        }
+    } catch (e) {
+        console.error("REST missions fetch failed:", e);
+    }
+}
+
 // ===============================
 // Server event handling
 // ===============================
@@ -141,17 +156,22 @@ function handleServerEvent(data) {
     if (!data || !data.event) return;
 
     if (data.event === "snapshot") {
-        const seen = new Set();
+        const seenOrders = new Set();
         (data.orders || []).forEach(order => {
             if (isBoardStatus(order.status)) {
-                seen.add(order.id);
+                seenOrders.add(order.id);
                 upsertOrder(order);
             }
         });
         // remove any cards we're showing that the snapshot no longer includes
         Array.from(orders.keys()).forEach(id => {
-            if (!seen.has(id)) removeOrder(id);
+            if (!seenOrders.has(id)) removeOrder(id);
         });
+
+        // load missions if included in snapshot
+        if (data.missions) {
+            data.missions.forEach(m => upsertMission(m));
+        }
         return;
     }
 
@@ -174,6 +194,10 @@ function handleServerEvent(data) {
 
     if (data.event === "order_removed") {
         removeOrder(data.order_id);
+    }
+
+    if (data.event === "mission_updated") {
+        upsertMission(data.mission);
     }
 }
 
@@ -220,6 +244,20 @@ function columnForStatus(status) {
     if (status === "sent") return document.getElementById("colSent");
     if (status === "awaiting_confirmation") return document.getElementById("colWaiting");
     return null;
+}
+
+function missionColumn() {
+    return document.getElementById("colMissions");
+}
+
+function missionStatusClass(status) {
+    if (status === "pending") return "pending";
+    if (status === "assigned") return "assigned";
+    if (status === "in_progress") return "in_progress";
+    if (status === "completed") return "completed";
+    if (status === "failed") return "failed";
+    if (status === "cancelled") return "cancelled";
+    return "";
 }
 
 function upsertOrder(order) {
@@ -391,6 +429,97 @@ function fillCardContent(card, order) {
             <div class="oc-items">${itemsHtml(order)}</div>
             ${alertBox}
         `;
+    }
+}
+
+// ===============================
+// Mission rendering
+// ===============================
+
+function buildMissionCard(mission) {
+    const card = document.createElement("div");
+    card.id = "mission-" + mission.mission_uid;
+    card.className = "mission-card mission-card-" + missionStatusClass(mission.status);
+    card.dataset.missionUid = mission.mission_uid;
+    fillMissionCardContent(card, mission);
+    return card;
+}
+
+function updateMissionCard(card, mission) {
+    card.className = "mission-card mission-card-" + missionStatusClass(mission.status);
+    fillMissionCardContent(card, mission);
+}
+
+function fillMissionCardContent(card, mission) {
+    const statusLabel = {
+        "pending": "در انتظار",
+        "assigned": "تخصیص یافته",
+        "in_progress": "در حال اجرا",
+        "completed": "انجام شده",
+        "failed": "خطا",
+        "cancelled": "لغو شده",
+    }[mission.status] || mission.status;
+
+    card.innerHTML = `
+        <div class="mc-head">
+            <span class="mc-code mono">${mission.mission_code}</span>
+            <span class="mc-badge mc-badge-${missionStatusClass(mission.status)}">${statusLabel}</span>
+        </div>
+        <div class="mc-dest"><i class="bi bi-geo-alt-fill"></i> میز ${mission.destination_table}</div>
+        <div class="mc-order">
+            <span class="mc-order-label">سفارش</span>
+            <span class="mc-order-id mono">#${mission.order_id}</span>
+        </div>
+        <div class="mc-table">شماره میز: ${mission.order_table}</div>
+        ${mission.robot_id ? `<div class="mc-robot"><i class="bi bi-robot"></i> ربات: ${mission.robot_id}</div>` : ""}
+        <div class="mc-time">
+            ایجاد: ${new Date(mission.created_at).toLocaleTimeString("fa-IR", {hour:"2-digit", minute:"2-digit"})}
+        </div>
+    `;
+}
+
+function upsertMission(mission) {
+    const prev = missions.get(mission.mission_uid);
+    missions.set(mission.mission_uid, mission);
+
+    const col = missionColumn();
+    if (!col) return;
+
+    let card = document.getElementById("mission-" + mission.mission_uid);
+    const statusChanged = !prev || prev.status !== mission.status;
+
+    if (card && statusChanged) {
+        card.remove();
+        card = null;
+    }
+
+    if (!card) {
+        card = buildMissionCard(mission);
+        col.prepend(card);
+        clearEmptyState(col);
+    } else {
+        updateMissionCard(card, mission);
+    }
+
+    refreshMissionCount();
+}
+
+function removeMission(missionUid) {
+    if (!missions.has(missionUid)) return;
+    missions.delete(missionUid);
+    const card = document.getElementById("mission-" + missionUid);
+    if (card) card.remove();
+    refreshMissionCount();
+}
+
+function refreshMissionCount() {
+    const col = missionColumn();
+    const countEl = document.getElementById("countMissions");
+    if (!col || !countEl) return;
+    const count = col.querySelectorAll(".mission-card").length;
+    countEl.textContent = count;
+    if (count === 0 && !col.querySelector(".kh-empty")) {
+        col.innerHTML = `<div class="kh-empty">مأموریتی برای ربات وجود ندارد</div>`;
     }
 }
 

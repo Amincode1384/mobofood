@@ -9,6 +9,7 @@ API آشپزخانه هر دو را برمی‌گرداند، انتقال غی�
 
 import json
 
+from django.contrib.auth.models import User
 from django.test import TestCase
 
 from .models import Category, Food, Order, OrderItem
@@ -16,6 +17,12 @@ from .models import Category, Food, Order, OrderItem
 
 class BoardBase(TestCase):
     def setUp(self):
+        # Kitchen APIs are staff-only; log in once for every test in this module.
+        staff, _ = User.objects.get_or_create(
+            username="board_staff", defaults={"is_staff": True}
+        )
+        self.client.force_login(staff)
+
         self.category = Category.objects.create(name="کباب‌ها", icon="🍢")
         self.food = Food.objects.create(
             category=self.category, name="کباب", price=250000, stock=50
@@ -113,7 +120,9 @@ class BoardFlowTests(BoardBase):
 
         response = self.post("ready")
 
-        self.assertEqual(response.status_code, 400)
+        # Marking ready twice is idempotent: no new mission, no new broadcast.
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["mission_created"])
         self.assertEqual(self.status(), "ready")
 
     def test_cannot_accept_an_already_cooking_order(self):

@@ -10,7 +10,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -19,13 +22,79 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-bze2os122$95nfei1d9gj-!8ooh@3!zxlb!gq37w$kutmc5sg^'
+# SECURITY: in production the key MUST come from the environment. The
+# hardcoded value below is only a local-development fallback so `manage.py
+# check` and the test suite work on a fresh checkout.
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-bze2os122$95nfei1d9gj-!8ooh@3!zxlb!gq37w$kutmc5sg^',
+)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = ["*"]
+# کلید اختصاصی «اعتبارنامهٔ پیگیری سفارش» (Order Tracking Token).
+# در production از متغیر محیطی ORDER_TRACKING_SECRET تنظیم شود. تغییر این
+# کلید فقط توکن‌های پیگیری قبلی را باطل می‌کند؛ سفارش‌ها و اطلاعاتشان
+# دست‌نخورده می‌مانند.
+ORDER_TRACKING_SECRET = os.environ.get('ORDER_TRACKING_SECRET') or SECRET_KEY
+
+
+# زمان تقریبی سفر ربات تا میز (ثانیه). پس از این زمان سفارش از «در حال
+# ارسال» به «در انتظار تأیید تحویل» می‌رود — نه به «تحویل‌شده».
+ROBOT_DELIVERY_SECONDS = int(os.environ.get('ROBOT_DELIVERY_SECONDS', '60'))
+
+# Movement Command / robot transport configuration.
+ROBOT_TRANSPORT_BACKEND = os.environ.get('ROBOT_TRANSPORT_BACKEND', 'memory')
+ROBOT_API_TOKEN = os.environ.get('ROBOT_API_TOKEN', '')
+ROBOT_ACK_TIMEOUT_SECONDS = int(os.environ.get('ROBOT_ACK_TIMEOUT_SECONDS', '5'))
+
+# Channel layer backend. In-memory keeps zero-config local dev/tests working;
+# Redis is required as soon as more than one process (Daphne + timer watcher,
+# or multiple Daphne workers) needs to share groups. Use CHANNEL_LAYER_BACKEND=redis
+# in production — in-memory groups are invisible to other processes.
+CHANNEL_LAYER_BACKEND = os.environ.get('CHANNEL_LAYER_BACKEND', 'memory').lower()
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
+
+# This is a local/prototype deployment: DEBUG stays on by default so the
+# existing test-suite and tablet UI work out of the box. In production set
+# DEBUG=0 explicitly.
+DEBUG = os.environ.get('DEBUG', '1') not in ('0', 'false', 'False', 'no')
+
+# Comma-separated hosts in production, e.g. ALLOWED_HOSTS=example.com,www.example.com.
+# The "*" default preserves current local behaviour; set it explicitly in prod.
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get('ALLOWED_HOSTS', '*').split(',')
+    if host.strip()
+]
+
+# Fail fast on a misconfigured production deployment instead of serving
+# debug pages with the committed development key or accepting every Host.
+if not DEBUG:
+    if 'DJANGO_SECRET_KEY' not in os.environ:
+        raise ImproperlyConfigured(
+            'DJANGO_SECRET_KEY must be set when DEBUG is disabled.'
+        )
+    if '*' in ALLOWED_HOSTS:
+        raise ImproperlyConfigured(
+            'ALLOWED_HOSTS must be explicit when DEBUG is disabled.'
+        )
+    if ROBOT_TRANSPORT_BACKEND == 'channels' and not ROBOT_API_TOKEN:
+        raise ImproperlyConfigured(
+            'ROBOT_API_TOKEN must be set when ROBOT_TRANSPORT_BACKEND=channels.'
+        )
+    # Only trust the proxy's HTTPS signal when traffic is terminated upstream.
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '0'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get(
+        'SECURE_HSTS_INCLUDE_SUBDOMAINS', '0'
+    ) not in ('0', 'false', 'False', 'no')
+    SECURE_HSTS_PRELOAD = os.environ.get(
+        'SECURE_HSTS_PRELOAD', '0'
+    ) not in ('0', 'false', 'False', 'no')
+    SECURE_SSL_REDIRECT = os.environ.get(
+        'SECURE_SSL_REDIRECT', '0'
+    ) not in ('0', 'false', 'False', 'no')
 
 
 # Application definition
@@ -34,7 +103,7 @@ INSTALLED_APPS = [
     # 'daphne' must be listed BEFORE 'django.contrib.staticfiles' so that
     # `python manage.py runserver` automatically becomes ASGI/WebSocket-aware
     # in local development too (no separate command needed).
-    # TEMPORARILY DISABLED: 'daphne',  # Needs Visual C++ compiler
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -44,6 +113,9 @@ INSTALLED_APPS = [
     'channels',
     'restaurant',
 ]
+
+# When behind a TLS-terminating reverse proxy, trust its forwarded scheme.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -79,17 +151,31 @@ WSGI_APPLICATION = 'RestaurantRobot.wsgi.application'
 # NEW: ASGI entry point — required for Channels/WebSockets.
 ASGI_APPLICATION = 'RestaurantRobot.asgi.application'
 
-# NEW: channel layer used to broadcast events from views to WebSocket
-# consumers. In-memory is perfect for a single process (your current
-# local run, and most small single-worker "Python hosting" plans).
-# If you later scale to multiple worker processes, switch this to
-# channels_redis.core.RedisChannelLayer with a real Redis instance —
-# in-memory layers don't share state across separate processes.
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-    },
-}
+# Channel layer used to broadcast events from views to the Daphne WebSocket
+# consumers. In-memory is fine for one process (local run and tests); the
+# env-driven Redis backend is required whenever more than one process needs
+# the same groups (Daphne + timer watcher, or multiple Daphne workers).
+if CHANNEL_LAYER_BACKEND == 'redis':
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+                "capacity": 1000,
+                "expiry": 10,
+            },
+        },
+    }
+elif CHANNEL_LAYER_BACKEND == 'memory':
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
+else:
+    raise ImproperlyConfigured(
+        "CHANNEL_LAYER_BACKEND must be 'memory' or 'redis'."
+    )
 
 
 # Database
@@ -98,7 +184,12 @@ CHANNEL_LAYERS = {
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        # DB_NAME lets a container mount a dedicated data directory so the
+        # SQLite file can be backed up independently of the image.
+        'NAME': os.environ.get('DB_NAME') or (BASE_DIR / 'db.sqlite3'),
+        # صبر برای قفل‌های کوتاه هم‌زمانی؛ درخواست دوم بعد از commit اولی
+        # با IntegrityError مواجه می‌شود و نتیجهٔ همان سفارش را می‌گیرد.
+        'OPTIONS': {'timeout': 20},
     }
 }
 

@@ -1,0 +1,31 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>مدیریت منو | آشپزخانه</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@500;600;700;800;900&family=JetBrains+Mono:wght@600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/Dashboard.css' %}">
+    <link rel="stylesheet" href="{% static 'css/menu_admin.css' %}?v=11">
+</head>
+<body>
+
+<header class="kh-header">
+    <div class="kh-brand"><i class="bi bi-journal-text"></i> مدیریت منو</div>
+
+    <div class="kh-header-right">
+        <a class="kh-nav-link" href="/dashboard/">
+            <i class="bi bi-arrow-right"></i> داشبورد آشپزخانه
+        </a>
+    </div>
+</header>
+
+{% include "partials/menu_management_panel.html" %}
+
+<script src="{% static 'js/menu_admin.js' %}?v=11"></script>
+</body>
+</html>

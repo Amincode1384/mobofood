@@ -450,3 +450,69 @@ main, .navbar, footer{ position:relative; z-index:2; }
     .food-info p{ display:none; }
     .table-pill{ display:none; }
 }
+
+/* ================= TOAST NOTIFICATIONS ================= */
+
+#toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    min-width: 280px;
+    max-width: 420px;
+    padding: 1rem 1.2rem;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    opacity: 0;
+    transform: translateX(120%);
+    transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+    font-size: 0.92rem;
+    font-weight: 600;
+    backdrop-filter: blur(10px);
+}
+
+#toast.show {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+#toast.success {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.95), rgba(16, 185, 129, 0.95));
+    color: #fff;
+    border: 2px solid rgba(255,255,255,0.3);
+}
+
+#toast.error {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(220, 38, 38, 0.95));
+    color: #fff;
+    border: 2px solid rgba(255,255,255,0.3);
+}
+
+#toast.warning {
+    background: linear-gradient(135deg, rgba(251, 146, 60, 0.95), rgba(249, 115, 22, 0.95));
+    color: #fff;
+    border: 2px solid rgba(255,255,255,0.3);
+}
+
+#toastIcon {
+    font-size: 1.4rem;
+    flex-shrink: 0;
+}
+
+#toastMsg {
+    flex: 1;
+    line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+    #toast {
+        top: auto;
+        bottom: 90px;
+        left: 16px;
+        right: 16px;
+        min-width: auto;
+    }
+}

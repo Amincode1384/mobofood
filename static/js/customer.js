@@ -6,7 +6,8 @@ customer.js
 API endpoints used:
   GET  /api/foods/
   POST /api/create_order/
-  GET  /api/orders/<id>/
+  GET  /api/orders/<id>/          (نیازمند Header: X-Order-Token)
+  POST /api/orders/<id>/confirm/  (نیازمند Header: X-Order-Token)
   GET  /api/seats/status/
   GET  /api/customer/check/
 */
@@ -44,6 +45,12 @@ let currentSearch = "";
 let selectedSeat = null;   // { tableIndex, chairIds: [...], tableLabel }
 let foodsLoaded = false;
 
+// QR Code: شماره میز از URL و وضعیت قفل
+let initialTableNumber = null;  // شماره میز از QR Code
+let isTableLocked = false;      // آیا میز قفل شده است؟
+let tableSignature = null;      // امضای امنیتی QR Code
+let isSubmittingOrder = false;  // جلوگیری از ارسال چندبارهٔ سفارش
+
 
 // ==========================
 // Body scroll lock (used while the auth / seat "gate" overlays are open)
@@ -61,10 +68,69 @@ function unlockBodyScroll() {
 
 
 // ==========================
+// QR Code: خواندن پارامترهای URL
+// ==========================
+
+function getUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        table: params.get('table'),
+        sig: params.get('sig')
+    };
+}
+
+function initQRCodeTable() {
+    const params = getUrlParams();
+
+    // اولویت با پارامترهای URL است (اسکن تازهٔ QR).
+    // اگر URL پارامتر نداشت (مثلاً بازگشت/رفرش بدون query)، ابتدا از
+    // مقادیر تزریق‌شده توسط Backend (context) و سپس از sessionStorage
+    // بازیابی می‌کنیم تا اطلاعات معتبر میز از بین نرود.
+    let tableParam = params.table;
+    let sigParam = params.sig;
+
+    if (!tableParam && window.__LUMEN_TABLE__ !== null && window.__LUMEN_TABLE__ !== undefined) {
+        tableParam = String(window.__LUMEN_TABLE__);
+        sigParam = window.__LUMEN_TABLE_SIGNATURE__ || null;
+    }
+
+    if (!tableParam) {
+        try {
+            const saved = JSON.parse(sessionStorage.getItem("tableAccess") || "null");
+            if (saved && saved.table) {
+                tableParam = String(saved.table);
+                sigParam = saved.sig || null;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    if (tableParam) {
+        initialTableNumber = parseInt(tableParam);
+        tableSignature = sigParam || null;
+
+        // اگر امضا وجود داشت، میز قفل می‌شود
+        if (sigParam) {
+            isTableLocked = true;
+            console.log(`✅ QR Code معتبر: میز ${initialTableNumber} قفل شد`);
+            // نگهداری برای رفرش/بازگشت
+            try {
+                sessionStorage.setItem("tableAccess", JSON.stringify({ table: initialTableNumber, sig: tableSignature }));
+            } catch (e) { /* ignore */ }
+        } else {
+            console.warn(`⚠️ شماره میز ${initialTableNumber} بدون امضا - قفل نشد`);
+        }
+    }
+}
+
+
+// ==========================
 // Start
 // ==========================
 
 window.onload = function () {
+    // ابتدا پارامترهای QR Code را بررسی می‌کنیم
+    initQRCodeTable();
+
     initLoader();
     initAuthGate();
     initMarquee();
@@ -412,6 +478,10 @@ function updateMusicIcon() {
 // Stock Helper
 // ==========================
 
+function isInactive(food) {
+    return !!food && food.is_active === false;
+}
+
 function isSoldOut(food) {
     if (!food) return false;
     if (food.available === false) return true;
@@ -564,16 +634,24 @@ function renderFoods(data) {
             totalCount++;
 
             const soldOut = isSoldOut(food);
+            const inactive = isInactive(food);
+            const blocked = soldOut || inactive;
             const imgSrc = food.image || "/static/images/no-food.png";
 
             const row = document.createElement("div");
-            row.className = "menu-row glass" + (soldOut ? " sold-out" : "");
+            row.className = "menu-row glass" +
+                (soldOut ? " sold-out" : "") +
+                (inactive ? " unavailable" : "");
             row.dataset.foodId = food.id;
+
+            const badge = inactive
+                ? '<span class="badge off">امروز ارائه نمی‌شود</span>'
+                : (soldOut ? '<span class="badge out">ناموجود</span>' : '');
 
             row.innerHTML = `
                 <div class="thumb">
                     <img src="${imgSrc}" onerror="this.src='/static/images/no-food.png'" alt="${food.name}">
-                    ${soldOut ? '<span class="badge out">ناموجود</span>' : ''}
+                    ${badge}
                 </div>
                 <div class="body">
                     <h4>${food.name}</h4>
@@ -582,11 +660,14 @@ function renderFoods(data) {
                     <div class="price-chip"><span class="mono-num">${Number(food.price).toLocaleString()}</span><span class="unit">تومان</span></div>
                 </div>
                 <div class="side">
-                    <button class="add-btn" ${soldOut ? "disabled" : ""} aria-label="افزودن ${food.name}"><i class="bi bi-plus-lg"></i></button>
+                    <button class="add-btn" ${blocked ? "disabled" : ""}
+                            aria-label="${blocked ? (inactive ? `${food.name} امروز ارائه نمی‌شود` : `${food.name} ناموجود است`) : `افزودن ${food.name}`}">
+                        <i class="bi bi-plus-lg"></i>
+                    </button>
                 </div>
             `;
 
-            if (!soldOut) {
+            if (!blocked) {
                 const btn = row.querySelector(".add-btn");
                 btn.addEventListener("click", function () {
                     addFood(food.id, food.name, food.price, btn);
@@ -783,7 +864,51 @@ function setupCartDrawer() {
     if (submitBtn) submitBtn.addEventListener("click", submitOrder);
 }
 
+// ==========================================================
+// IDEMPOTENCY — یک کلید برای هر عملیات منطقی ثبت سفارش
+// ==========================================================
+
+const ORDER_SUBMIT_STATE = { idle: "idle", submitting: "submitting", success: "success", error: "error" };
+let orderSubmitState = ORDER_SUBMIT_STATE.idle;
+let pendingOrderSubmission = null;   // { key, fingerprint } — برای Retry همان کلید می‌ماند
+
+function generateIdempotencyKey() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(bytes);
+    } else {
+        for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+    }
+    return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// اثر انگشت سمت کلاینت فقط برای تشخیص «همان عملیات» در Retry است؛
+// دادهٔ امنیتی نیست و Backend اثر انگشت معتبر خودش را می‌سازد.
+function orderRequestFingerprint(payload) {
+    const items = (payload.foods || [])
+        .map(f => [Number(f.id), Number(f.qty)])
+        .sort((a, b) => a[0] - b[0]);
+    return JSON.stringify({
+        table: String(payload.table),
+        seats: (payload.seats || []).slice().sort(),
+        items: items
+    });
+}
+
+function setOrderSubmitState(state) {
+    orderSubmitState = state;
+    isSubmittingOrder = (state === ORDER_SUBMIT_STATE.submitting);
+    const btn = document.getElementById("submitOrderBtn");
+    if (btn) btn.dataset.state = state;
+}
+
 async function submitOrder() {
+    // هر لحظه فقط یک درخواست؛ کلیک دوم تا پایان پاسخ نادیده گرفته می‌شود.
+    if (orderSubmitState === ORDER_SUBMIT_STATE.submitting) return;
+
     if (!selectedSeat) {
         const seatMsg = document.getElementById("seatRequiredMsg");
         if (seatMsg) seatMsg.classList.add("show");
@@ -796,14 +921,42 @@ async function submitOrder() {
         return;
     }
 
+    // 🔐 اعتبارسنجی امنیتی میز در سمت Frontend (اعتبارسنجی نهایی در Backend است)
+    // سفارش فقط برای میزی که با QR Code معتبر قفل شده است امکان‌پذیر است.
+    if (!isTableLocked || initialTableNumber === null) {
+        showToast("برای ثبت سفارش باید QR Code روی میز خود را اسکن کنید.", true);
+        return;
+    }
+    if (selectedSeat.tableIndex !== initialTableNumber) {
+        showToast("⚠️ میز انتخاب‌شده با میز QR Code مطابقت ندارد. لطفاً دوباره تلاش کنید.", true);
+        return;
+    }
+    if (!tableSignature) {
+        showToast("امضای امنیتی میز موجود نیست. لطفاً QR Code را دوباره اسکن کنید.", true);
+        return;
+    }
+
     const currentUser = getCurrentUser();
     const order = {
         table: selectedSeat.tableIndex,
+        table_signature: tableSignature,
         seats: selectedSeat.chairIds,
         name: currentUser ? currentUser.name : undefined,
         phone: currentUser ? currentUser.phone : undefined,
         foods: cart
     };
+
+    // کلید Idempotency: تا وقتی خودِ عملیات (میز/صندلی/اقلام) عوض نشده،
+    // برای Retry همان کلید حفظ می‌شود تا سفارش تکراری ساخته نشود.
+    const fingerprint = orderRequestFingerprint(order);
+    if (!pendingOrderSubmission || pendingOrderSubmission.fingerprint !== fingerprint) {
+        pendingOrderSubmission = { key: generateIdempotencyKey(), fingerprint: fingerprint };
+    }
+    order.idempotency_key = pendingOrderSubmission.key;
+
+    setOrderSubmitState(ORDER_SUBMIT_STATE.submitting);
+    const submitBtn = document.getElementById("submitOrderBtn");
+    if (submitBtn) submitBtn.disabled = true;
 
     try {
         const response = await fetch("/api/create_order/", {
@@ -818,23 +971,52 @@ async function submitOrder() {
         const data = await response.json();
 
         if (!response.ok) {
+            setOrderSubmitState(ORDER_SUBMIT_STATE.error);
             showToast(data.error || "خطا در ثبت سفارش", true);
             return;
         }
 
         if (data.success) {
+            const orderId = data.order_id;
+
+            // اگر سرور موفقیت اعلام کرد اما شناسهٔ سفارش برنگرداند، پیام
+            // موفقیت نمایش نمی‌دهیم تا مشتری شمارهٔ نامعتبر نبیند.
+            if (orderId === undefined || orderId === null || orderId === "") {
+                setOrderSubmitState(ORDER_SUBMIT_STATE.error);
+                showToast("سفارش ثبت شد اما شمارهٔ سفارش دریافت نشد. لطفاً با پشتیبانی تماس بگیرید.", true);
+                return;
+            }
+
+            // 🔐 اعتبارنامهٔ پیگیری: فقط در پاسخ ثبت سفارش برمی‌گردد و
+            // همراه همین سفارش در sessionStorage نگهداری می‌شود.
+            const trackingToken = (typeof data.tracking_token === "string")
+                ? data.tracking_token
+                : null;
+
+            if (!trackingToken) {
+                showToast("سفارش ثبت شد اما کلید پیگیری دریافت نشد. لطفاً صفحه را رفرش نکنید و با پشتیبانی تماس بگیرید.", true);
+            }
+
+            // عملیات با موفقیت ثبت شد → کلید مصرف شد و عملیات بعدی کلید نو می‌گیرد
+            pendingOrderSubmission = null;
+            setOrderSubmitState(ORDER_SUBMIT_STATE.success);
+
             cart = [];
             saveCart();
             renderCart();
 
-            const orderId = data.order_id;
             const tableLabel = selectedSeat.tableLabel;
-            const newOrder = { id: orderId, tableLabel: tableLabel, createdAt: Date.now() };
+            const newOrder = {
+                id: orderId,
+                tableLabel: tableLabel,
+                createdAt: Date.now(),
+                token: trackingToken
+            };
             addOrderToHistory(newOrder);
 
             closeCartDrawer();
 
-            showToast("سفارش با موفقیت ثبت شد!", false);
+            showToast(`سفارش شما با موفقیت ثبت شد — شمارهٔ سفارش: ${orderId}`, false);
 
             const fab = document.getElementById("trackFab");
             const ping = document.getElementById("trackPing");
@@ -843,104 +1025,53 @@ async function submitOrder() {
 
             openTrackDetail(newOrder);
         } else {
+            setOrderSubmitState(ORDER_SUBMIT_STATE.error);
             showToast(data.error || "خطا در ثبت سفارش", true);
         }
 
     } catch (error) {
         console.error("Submit Order Error:", error);
-        showToast("خطا در ارتباط با سرور", true);
-    }
-}
-
-
-// ==========================================================
-// SEAT / TABLE PICKER — 64 tables, dynamic layout, real occupancy
-// ==========================================================
-
-// ---- Floor configuration (تغییر تعداد میزها فقط همینجا) ----
-const FLOOR_TOTAL_TABLES     = 4;    // تعداد میزها کاهش یافت به 4 میز
-const FLOOR_TWO_SEATER_START = 999;  // همه میزها 4 نفره (هیچ میز دو نفره‌ای نداریم)
-const FLOOR_COLS             = 2;    // چیدمان 2 ستونی (2x2)
-
-// فاصله‌ی صندلی از مرکز میز (px)
-const CHAIR_OFFSETS_4 = [ // میز ۴ نفره
-    { key: "top",    dx: 0,   dy: -72 },
-    { key: "right",  dx: 72,  dy: 0   },
-    { key: "bottom", dx: 0,   dy: 72  },
-    { key: "left",   dx: -72, dy: 0   }
-];
-const CHAIR_OFFSETS_2 = [ // میز ۲ نفره — فقط دو طرف مقابل هم
-    { key: "top",    dx: 0, dy: -78 },
-    { key: "bottom", dx: 0, dy: 78  }
-];
-
-// جیتر ثابت (deterministic) — تصادفی به‌نظر می‌رسه ولی هر بار همون مقدار رو می‌ده
-function seededJitter(seed) {
-    const x = Math.sin(seed * 12.9898) * 43758.5453;
-    return (x - Math.floor(x)) - 0.5; // -0.5..0.5
-}
-
-// تولید layout به‌جای آرایه‌ی دستی — فقط یک‌بار در زمان لود اسکریپت اجرا می‌شود
-function generateSeatLayout(totalTables, cols) {
-    const rows = Math.ceil(totalTables / cols);
-
-    const marginX = 7, marginY = 9;      // درصد فاصله از لبه‌ی سالن
-    const usableW = 100 - marginX * 2;
-    const usableH = 100 - marginY * 2;
-
-    const colGroups = Math.ceil(cols / 4);   // هر ۴ ستون یک راهرو عمودی
-    const rowGroups = Math.ceil(rows / 4);   // هر ۴ ردیف یک راهرو افقی
-    const aisleColGap = 4.2;                 // % فاصله‌ی راهرو عمودی
-    const aisleRowGap = 5.5;                 // % فاصله‌ی راهرو افقی
-
-    const cellW = (usableW - aisleColGap * (colGroups - 1)) / cols;
-    const cellH = (usableH - aisleRowGap * (rowGroups - 1)) / rows;
-
-    const layout = [];
-    let tableIndex = 0;
-
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            tableIndex++;
-            if (tableIndex > totalTables) break;
-
-            const colGroupIdx = Math.floor(c / 4);
-            const rowGroupIdx = Math.floor(r / 4);
-
-            let left = marginX + c * cellW + colGroupIdx * aisleColGap + cellW / 2;
-            let top  = marginY + r * cellH + rowGroupIdx * aisleRowGap + cellH / 2;
-
-            // آفست طبیعی و ثابت، تا شبیه جدول خشک نباشه ولی هر بار همون شکل بمونه
-            left += seededJitter(tableIndex * 3.1) * (cellW * 0.22);
-            top  += seededJitter(tableIndex * 7.7) * (cellH * 0.22);
-
-            const isTwoSeater = tableIndex >= FLOOR_TWO_SEATER_START;
-
-            layout.push({
-                id: "T" + String(tableIndex).padStart(2, "0"), // T01 .. T64
-                tableIndex: tableIndex,
-                leftPct: left,
-                topPct: top,
-                seatCount: isTwoSeater ? 2 : 4
-            });
+        setOrderSubmitState(ORDER_SUBMIT_STATE.error);
+        showToast("خطا در ارتباط با سرور — با همین شمارهٔ سفارش دوباره تلاش کنید.", true);
+    } finally {
+        // خطا/شبکه: کلید برای تلاش مجدد حفظ ماند؛ وضعیت دکمه آزاد می‌شود
+        if (orderSubmitState === ORDER_SUBMIT_STATE.submitting) {
+            setOrderSubmitState(ORDER_SUBMIT_STATE.idle);
         }
+        // بازگرداندن وضعیت دکمهٔ ثبت بر اساس سبد/میز
+        renderCart();
     }
-    return layout;
 }
 
-// این‌جا یک‌بار (در زمان لود اسکریپت) تولید می‌شه، نه هر بار رندر
-const SEAT_LAYOUT = generateSeatLayout(FLOOR_TOTAL_TABLES, FLOOR_COLS);
+
+// ==========================================================
+// SEAT / TABLE PICKER — دو مرحله: انتخاب میز (۲×۲) → انتخاب صندلی (چند رقمรอบ میز)
+// ==========================================================
 
 const SEATS_STATUS_URL = "/api/seats/status/";
-let occupiedChairs = new Set();   // filled from the backend, not random
-let pendingTableIndex = null;     // the table currently being picked on (locks selection to one table)
-let pendingChairIds = [];         // chair keys selected so far, e.g. ["T03-top","T03-right"]
 
-// --- کش DOM: میزها فقط یک‌بار ساخته می‌شوند، بعد از آن فقط کلاس‌ها تغییر می‌کنند ---
-let seatFloorBuilt = false;
-let chairElementsByKey = {};
-let tableGroupElements = {};
+// ۴ میز — هر میز ۴ صندلی دارد: بالا، راست، پایین، چپ
+const TABLES = [
+    { number: 1 },
+    { number: 2 },
+    { number: 3 },
+    { number: 4 }
+];
 
+// ۴ جهت برای صندلی هر میز
+const CHAIR_DIRECTIONS = ["top", "right", "bottom", "left"];
+
+// ---- وضعیت انتخاب (در حین باز نشدن منو) ----
+let pendingTableNumber = null;   // شماره میز انتخاب‌شده در مرحله ۱
+let pendingChairIds = [];         // کلیدهای صندلی انتخاب‌شده، مثلاً ["1-top","1-right"]
+let occupiedChairs = new Set();   // از بک‌اند پر می‌شود (مثلاً ["1-top","1-right"])
+
+// کش عناصر DOM
+let tableCardElements = {};
+let chairElements = {};
+let chairStageBuilt = false;
+
+// دریافت وضعیت اشغال صندلی‌ها از سرور
 async function fetchSeatOccupancy() {
     try {
         const res = await fetch(SEATS_STATUS_URL);
@@ -949,279 +1080,188 @@ async function fetchSeatOccupancy() {
         occupiedChairs = new Set(data.occupied || []);
     } catch (e) {
         console.error("Seat status fetch failed:", e);
-        occupiedChairs = new Set(); // fail open: show everything as free rather than block ordering
+        occupiedChairs = new Set(); // fail open
     }
 }
 
-// ---------- Zoom / Pan / Rotate state ----------
-const floorState = { scale: 1, tx: 0, ty: 0, rotateZ: 0 };
-const FLOOR_MIN_SCALE = 0.55;
-const FLOOR_MAX_SCALE = 2.6;
-const FLOOR_BASE_TILT = 52; // درجه، خم شدن ثابت کف برای حس 3D
+// مرحله ۱: ساخت کارت‌های میز (شبکه ۲×۲)
+function buildTableCards() {
+    const grid = document.getElementById("seatTableGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    tableCardElements = {};
 
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-function pointerDist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+    TABLES.forEach(function (table) {
+        const card = document.createElement("div");
+        card.className = "seat-table-card";
+        card.dataset.tableNumber = table.number;
+        card.dataset.tableIndex = table.number;
 
-function applyFloorTransform() {
-    const floor = document.getElementById("seatFloor");
-    if (!floor) return;
-    floor.style.transform =
-        `translate(${floorState.tx}px, ${floorState.ty}px) ` +
-        `scale(${floorState.scale}) ` +
-        `rotateX(${FLOOR_BASE_TILT}deg) rotateZ(${floorState.rotateZ}deg)`;
-}
-
-function resetFloorTransform() {
-    floorState.scale = 1;
-    floorState.tx = 0;
-    floorState.ty = 0;
-    floorState.rotateZ = 0;
-    applyFloorTransform();
-}
-
-function rotateFloor(deltaDeg) {
-    floorState.rotateZ += deltaDeg;
-    applyFloorTransform();
-}
-
-function zoomFloorBy(delta) {
-    floorState.scale = clamp(floorState.scale + delta, FLOOR_MIN_SCALE, FLOOR_MAX_SCALE);
-    applyFloorTransform();
-}
-
-function initFloorGestures() {
-    const viewport = document.getElementById("seatFloorViewport");
-    if (!viewport) return;
-
-    const activePointers = new Map();
-    let dragState = null;
-    let pinchState = null;
-
-    viewport.addEventListener("pointerdown", function (e) {
-        viewport.setPointerCapture(e.pointerId);
-        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-        if (activePointers.size === 1) {
-            dragState = { startX: e.clientX, startY: e.clientY, originTx: floorState.tx, originTy: floorState.ty };
-        } else if (activePointers.size === 2) {
-            const pts = Array.from(activePointers.values());
-            pinchState = { startDist: pointerDist(pts[0], pts[1]), startScale: floorState.scale };
-            dragState = null;
-        }
-    });
-
-    viewport.addEventListener("pointermove", function (e) {
-        if (!activePointers.has(e.pointerId)) return;
-        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-        if (activePointers.size === 2 && pinchState) {
-            const pts = Array.from(activePointers.values());
-            const ratio = pointerDist(pts[0], pts[1]) / pinchState.startDist;
-            floorState.scale = clamp(pinchState.startScale * ratio, FLOOR_MIN_SCALE, FLOOR_MAX_SCALE);
-            applyFloorTransform();
-        } else if (dragState) {
-            floorState.tx = dragState.originTx + (e.clientX - dragState.startX);
-            floorState.ty = dragState.originTy + (e.clientY - dragState.startY);
-            applyFloorTransform();
-        }
-    });
-
-    function endPointer(e) {
-        activePointers.delete(e.pointerId);
-        if (activePointers.size < 2) pinchState = null;
-        if (activePointers.size === 0) dragState = null;
-    }
-    viewport.addEventListener("pointerup", endPointer);
-    viewport.addEventListener("pointercancel", endPointer);
-    viewport.addEventListener("pointerleave", endPointer);
-
-    viewport.addEventListener("wheel", function (e) {
-        e.preventDefault();
-        zoomFloorBy(e.deltaY > 0 ? -0.12 : 0.12);
-    }, { passive: false });
-}
-
-function initSeatPicker() {
-    const closeBtn = document.getElementById("seatClose");
-    const pillBtn = document.getElementById("seatPillBtn");
-    const overlay = document.getElementById("seatOverlay");
-    const rotateLeft = document.getElementById("rotateLeft");
-    const rotateRight = document.getElementById("rotateRight");
-    const confirmBtn = document.getElementById("seatConfirmBtn");
-    const zoomInBtn = document.getElementById("zoomInBtn");
-    const zoomOutBtn = document.getElementById("zoomOutBtn");
-    const zoomResetBtn = document.getElementById("zoomResetBtn");
-
-    // Re-opening from the navbar pill lets them change seats later —
-    // closing is allowed there. During first-time onboarding the modal
-    // is opened programmatically by maybeOpenSeatGate(); the close
-    // button still works so no one gets stuck if they close by mistake,
-    // they'll just be prompted again next time they try to order.
-    if (pillBtn) pillBtn.addEventListener("click", openSeatModal);
-    if (closeBtn) closeBtn.addEventListener("click", closeSeatModal);
-    if (overlay) overlay.addEventListener("click", function (e) {
-        if (e.target === overlay) closeSeatModal();
-    });
-
-    if (rotateLeft) rotateLeft.addEventListener("click", function () { rotateFloor(-45); });
-    if (rotateRight) rotateRight.addEventListener("click", function () { rotateFloor(45); });
-    if (zoomInBtn) zoomInBtn.addEventListener("click", function () { zoomFloorBy(0.2); });
-    if (zoomOutBtn) zoomOutBtn.addEventListener("click", function () { zoomFloorBy(-0.2); });
-    if (zoomResetBtn) zoomResetBtn.addEventListener("click", resetFloorTransform);
-
-    if (confirmBtn) confirmBtn.addEventListener("click", confirmSeatSelection);
-
-    // DOM ۶۴ میز رو یک‌بار می‌سازه، بار اول با occupancy خالی
-    renderSeatFloor();
-    resetFloorTransform();
-    initFloorGestures();
-}
-
-async function openSeatModal() {
-    const overlay = document.getElementById("seatOverlay");
-    if (overlay) { overlay.classList.add("open"); lockBodyScroll(); }
-
-    // Reset the in-progress picker state (previous confirmed selection,
-    // if any, is untouched until they hit "تأیید" again).
-    pendingTableIndex = null;
-    pendingChairIds = [];
-
-    await fetchSeatOccupancy();
-    renderSeatFloor();
-    resetSeatSummary();
-    resetFloorTransform();
-}
-
-function closeSeatModal() {
-    const overlay = document.getElementById("seatOverlay");
-    if (overlay && overlay.classList.contains("open")) {
-        overlay.classList.remove("open");
-        unlockBodyScroll();
-    }
-}
-
-// ---------- ساخت DOM (فقط یک‌بار، نه در هر رندر) ----------
-function buildSeatFloorDOM() {
-    const floor = document.getElementById("seatFloor");
-    if (!floor) return;
-    floor.innerHTML = "";
-    chairElementsByKey = {};
-    tableGroupElements = {};
-
-    SEAT_LAYOUT.forEach(function (table) {
-        const group = document.createElement("div");
-        group.className = "table-group " + (table.seatCount === 2 ? "table-two" : "table-four");
-        group.style.left = table.leftPct + "%";
-        group.style.top = table.topPct + "%";
-        group.dataset.tableId = table.id;
-        group.dataset.tableIndex = table.tableIndex;
-
-        group.innerHTML = `
-            <div class="table-core">
-                <div class="table-shadow"></div>
-                <div class="table-edge"></div>
-                <div class="table-top"><span class="table-label">${table.tableIndex}</span></div>
-            </div>
+        card.innerHTML = `
+            <div class="seat-table-icon"><i class="bi bi-table"></i></div>
+            <div class="seat-table-number">${table.number}</div>
+            <div class="seat-table-label-small">میز ${table.number} — ۴ صندلی</div>
         `;
 
-        const chairDefs = table.seatCount === 2 ? CHAIR_OFFSETS_2 : CHAIR_OFFSETS_4;
-        chairDefs.forEach(function (chairDef) {
-            const chairKey = table.id + "-" + chairDef.key;
-
-            const chair = document.createElement("div");
-            chair.className = "chair";
-            chair.style.left = "calc(50% + " + chairDef.dx + "px)";
-            chair.style.top  = "calc(50% + " + chairDef.dy + "px)";
-            chair.dataset.chairKey = chairKey;
-            chair.dataset.tableIndex = table.tableIndex;
-
-            chair.innerHTML = `
-                <div class="chair-back"></div>
-                <div class="chair-seat"></div>
-                <div class="chair-reticle"></div>
-            `;
-
-            chair.addEventListener("click", function () {
-                handleChairClick(table.tableIndex, chairKey);
-            });
-
-            chairElementsByKey[chairKey] = chair;
-            group.appendChild(chair);
+        card.addEventListener("click", function () {
+            handleTableClick(table.number);
         });
 
-        tableGroupElements[table.tableIndex] = group;
-        floor.appendChild(group);
-    });
-
-    seatFloorBuilt = true;
-}
-
-// کلیک روی صندلی — همون قانون قبلی: occupied یا قفل‌شده روی میز دیگه قابل‌کلیک نیست
-function handleChairClick(tableIndex, chairKey) {
-    if (occupiedChairs.has(chairKey)) return;
-    if (pendingTableIndex !== null && pendingTableIndex !== tableIndex) return;
-    toggleChair(tableIndex, chairKey);
-}
-
-// ---------- فقط آپدیت کلاس‌های DOM موجود، بدون بازسازی هر بار ----------
-function updateSeatFloorState() {
-    SEAT_LAYOUT.forEach(function (table) {
-        const group = tableGroupElements[table.tableIndex];
-        if (!group) return;
-
-        let anySelected = false;
-        let allOccupied = true;
-
-        const chairDefs = table.seatCount === 2 ? CHAIR_OFFSETS_2 : CHAIR_OFFSETS_4;
-        chairDefs.forEach(function (chairDef) {
-            const chairKey = table.id + "-" + chairDef.key;
-            const chair = chairElementsByKey[chairKey];
-            if (!chair) return;
-
-            const isOccupied = occupiedChairs.has(chairKey);
-            const isSelected = pendingChairIds.indexOf(chairKey) !== -1;
-            // Once a table is locked in, chairs at every other table are disabled
-            // so a single order can't span multiple tables.
-            const isLockedElsewhere = pendingTableIndex !== null && pendingTableIndex !== table.tableIndex;
-
-            if (isSelected) anySelected = true;
-            if (!isOccupied) allOccupied = false;
-
-            chair.classList.toggle("occupied", isOccupied || isLockedElsewhere);
-            chair.classList.toggle("free", !isOccupied && !isLockedElsewhere);
-            chair.classList.toggle("selected", isSelected);
-        });
-
-        group.classList.toggle("selected", anySelected);
-        group.classList.toggle("table-full", allOccupied);
+        tableCardElements[table.number] = card;
+        grid.appendChild(card);
     });
 }
 
-// این تابع همون اسم قبلی رو نگه داشته تا بقیه‌ی کد صدا زدنش عوض نشه؛
-// اما دیگر innerHTML را از صفر نمی‌سازد — فقط اولین بار DOM را می‌سازد
-// و از آن به بعد فقط کلاس‌ها را به‌روزرسانی می‌کند.
-function renderSeatFloor() {
-    if (!seatFloorBuilt) buildSeatFloorDOM();
-    updateSeatFloorState();
+// کاربر میز را انتخاب کرد — به مرحله ۲ برو
+function handleTableClick(tableNumber) {
+    // اگر میز از QR قفل شده، فقط همان میز قابل انتخاب است
+    if (isTableLocked && initialTableNumber !== null && tableNumber !== initialTableNumber) {
+        showToast("⚠️ میز شما از QR قفل شده است. فقط می‌توانید میز " + initialTableNumber + " را انتخاب کنید.", "warning");
+        return;
+    }
+
+    pendingTableNumber = tableNumber;
+    pendingChairIds = [];
+
+    // کارت انتخاب‌شده را مشخص کن
+    Object.keys(tableCardElements).forEach(function (n) {
+        tableCardElements[n].classList.toggle("selected", Number(n) === tableNumber);
+    });
+
+    // مرحله ۲ را نشان بده (میز بزرگ + صندلی‌ها)
+    document.getElementById("seatPhaseTables").style.display = "none";
+    document.getElementById("seatPhaseChairs").style.display = "block";
+
+    // شماره میز را در هدینگ fase ۲ بنویس
+    document.getElementById("chairPhaseTableNum").textContent = tableNumber;
+    document.getElementById("chairTableLabel").textContent = "میز " + tableNumber;
+
+    // صندلی‌ها را دور میز بزرگ بساز (یک‌بار)
+    buildChairStage(tableNumber);
+    updateChairState(tableNumber);
+
+    // خلاصه انتخاب را، به‌روز کن
+    resetSeatSummary();
+    updateSeatSummary();
+
+    // اگر میز قفل شده، غیرفعالࠗ کارت‌های دیگر
+    updateTableCardStates();
 }
 
-function toggleChair(tableIndex, chairKey) {
+// کارت‌های میز دیگر را غیرفعال کن
+function updateTableCardStates() {
+    TABLES.forEach(function (table) {
+        const card = tableCardElements[table.number];
+        if (!card) return;
+
+        // اگر QR قفل شده، فقط میز قفل‌شده نمایش داده می‌شود و بقیه-locked هستندـ
+        if (isTableLocked && initialTableNumber !== null && table.number !== initialTableNumber) {
+            card.classList.add("locked");
+            card.classList.remove("selected");
+            return;
+        }
+
+        // اگر میز دیگری التأیید نشده ولی هم‌ภาษا انتخاب نشده، غیرفعال نیست
+        if (pendingTableNumber !== null && table.number !== pendingTableNumber) {
+            card.classList.add("locked");
+            card.classList.remove("selected");
+        } else {
+            card.classList.remove("locked");
+            if (table.number === pendingTableNumber && pendingChairIds.length > 0) {
+                // اگر میز انتخاب شده و صندلی هم انتخاب شده
+                card.classList.add("selected");
+            }
+        }
+    });
+}
+
+// مرحله ۲: ساخت میز بزرگ + ۴ صندلی دورش
+function buildChairStage(tableNumber) {
+    if (chairStageBuilt) return;
+    chairStageBuilt = true;
+
+    const top = document.getElementById("chairTop");
+    const right = document.getElementById("chairRight");
+    const bottom = document.getElementById("chairBottom");
+    const left = document.getElementById("chairLeft");
+
+    [top, right, bottom, left].forEach(function (el) {
+        if (!el) return;
+
+        el.innerHTML = "";
+        const dir = el.dataset.chair;
+        const chairKey = tableNumber + "-" + dir;
+        el.dataset.chairKey = chairKey;
+        el.dataset.tableNumber = tableNumber;
+
+        // برچسب جهت صندلی را درون آیکون بنویس
+        el.innerHTML = `
+            <span class="chair-label">${dir === "top" ? "بالا" : dir === "right" ? "راست" : dir === "bottom" ? "پایین" : "چپ"}</span>
+        `;
+
+        el.addEventListener("click", function () {
+            handleChairClick(chairKey);
+        });
+
+        chairElements[chairKey] = el;
+    });
+
+    // اگر QR قفل شده، کارت‌های دیگر غیرفعال کن
+    updateTableCardStates();
+}
+
+// وضعیت صندلی‌ها را آپدیت کن
+function updateChairState(tableNumber) {
+    CHAIR_DIRECTIONS.forEach(function (dir) {
+        const chairKey = tableNumber + "-" + dir;
+        const el = chairElements[chairKey];
+        if (!el) return;
+
+        const isOccupied = occupiedChairs.has(chairKey);
+        const isSelected = pendingChairIds.indexOf(chairKey) !== -1;
+
+        el.classList.toggle("occupied", isOccupied);
+        el.classList.toggle("free", !isOccupied);
+        el.classList.toggle("selected", isSelected);
+    });
+}
+
+// کاربر روی صندلی کلیک کرد
+function handleChairClick(chairKey) {
+    // صندلی مشغول است — انتخاب نمی‌شود
+    if (occupiedChairs.has(chairKey)) {
+        showToast("این صندلی مشغول است.", "warning");
+        return;
+    }
+
+    // میز قفل است و این صندلی متعلق به میز دیگر است
+    const parts = chairKey.split("-");
+    const chairTable = Number(parts[0]);
+    if (isTableLocked && initialTableNumber !== null && chairTable !== initialTableNumber) {
+        showToast("⚠️ میز شما قفل شده است. فقط صندلی‌های میز " + initialTableNumber + " را انتخاب کنید.", "warning");
+        return;
+    }
+
+    toggleChair(chairKey);
+}
+
+// صندلی را اضافه یا حذف از انتخاب
+function toggleChair(chairKey) {
     const idx = pendingChairIds.indexOf(chairKey);
 
     if (idx !== -1) {
-        // deselecting
         pendingChairIds.splice(idx, 1);
-        if (pendingChairIds.length === 0) pendingTableIndex = null;
+        chairElements[chairKey].classList.remove("selected");
     } else {
-        // first chair picked locks the table for this order
-        if (pendingTableIndex === null) pendingTableIndex = tableIndex;
+        // اولین صندلی انتخاب شد: فقط صندلی‌های همین میز قابل انتخاب می‌باشند
         pendingChairIds.push(chairKey);
+        chairElements[chairKey].classList.add("selected");
     }
 
-    renderSeatFloor();
     updateSeatSummary();
 }
 
+// خلاصه انتخاب را نمایش بده
 function resetSeatSummary() {
     const title = document.getElementById("seatSummaryTitle");
     const sub = document.getElementById("seatSummarySub");
@@ -1229,7 +1269,13 @@ function resetSeatSummary() {
     const confirmBtn = document.getElementById("seatConfirmBtn");
 
     if (title) title.textContent = "هنوز میزی انتخاب نشده";
-    if (sub) sub.textContent = "روی یکی از صندلی‌ها بزن — می‌تونی چند صندلی هم انتخاب کنی";
+    if (sub) {
+        if (pendingTableNumber !== null) {
+            sub.textContent = "می‌تونی صندلی‌های میز " + pendingTableNumber + " را انتخاب کنی یا برگردی";
+        } else {
+            sub.textContent = "برای شروع، یکی از میزهای بالا را انتخاب کن";
+        }
+    }
     if (dots) dots.innerHTML = "";
     if (confirmBtn) confirmBtn.disabled = true;
 }
@@ -1241,36 +1287,132 @@ function updateSeatSummary() {
     const confirmBtn = document.getElementById("seatConfirmBtn");
 
     if (pendingChairIds.length === 0) {
-        resetSeatSummary();
-        return;
-    }
-
-    const count = pendingChairIds.length;
-    if (title) title.textContent = "میز " + pendingTableIndex + " — " + count + " صندلی انتخاب شد";
-    if (sub) sub.textContent = "می‌تونی صندلی بیشتری هم اضافه کنی یا تأیید کن";
-    if (dots) {
-        dots.innerHTML = "";
-        for (let i = 0; i < 4; i++) {
-            const d = document.createElement("span");
-            if (i < count) d.classList.add("filled");
-            dots.appendChild(d);
+        if (pendingTableNumber !== null) {
+            if (title) title.textContent = "میز " + pendingTableNumber + " — صندلی انتخاب نشده";
+            if (sub) sub.textContent = "روی صندلی‌ها بزن تا انتخاب کنی";
+            if (confirmBtn) confirmBtn.disabled = true;
+        } else {
+            resetSeatSummary();
+            return;
         }
+    } else {
+        const count = pendingChairIds.length;
+        if (title) title.textContent = "میز " + pendingTableNumber + " — " + count + " صندلی انتخاب شد";
+        if (sub) sub.textContent = "صندلی بیشتر هم اضافه کنی یا تأیید کن";
+        if (dots) {
+            dots.innerHTML = "";
+            for (let i = 0; i < 4; i++) {
+                const d = document.createElement("span");
+                if (i < count) d.classList.add("filled");
+                dots.appendChild(d);
+            }
+        }
+        if (confirmBtn) confirmBtn.disabled = false;
     }
-    if (confirmBtn) confirmBtn.disabled = false;
+}
+
+// ===================== دکمه‌های کنترل =====================
+function initSeatPicker() {
+    const closeBtn = document.getElementById("seatClose");
+    const pillBtn = document.getElementById("seatPillBtn");
+    const overlay = document.getElementById("seatOverlay");
+    const backBtn = document.getElementById("seatBackBtn");
+    const confirmBtn = document.getElementById("seatConfirmBtn");
+
+    if (pillBtn) pillBtn.addEventListener("click", openSeatModal);
+    if (closeBtn) closeBtn.addEventListener("click", closeSeatModal);
+    if (overlay) overlay.addEventListener("click", function (e) {
+        if (e.target === overlay) closeSeatModal();
+    });
+
+    if (backBtn) backBtn.addEventListener("click", function () {
+        // برگشت از مرحله ۲ به مرحله ۱ (پاک کردن انتخاب صندلی)
+        pendingChairIds = [];
+        if (pendingTableNumber !== null) {
+            document.getElementById("seatPhaseTables").style.display = "block";
+            document.getElementById("seatPhaseChairs").style.display = "none";
+            Object.keys(tableCardElements).forEach(function (n) {
+                tableCardElements[n].classList.remove("selected");
+            });
+            pendingTableNumber = null;
+        }
+        resetSeatSummary();
+        updateTableCardStates();
+    });
+
+    if (confirmBtn) confirmBtn.addEventListener("click", confirmSeatSelection);
+
+    // ساخت کارت‌های میز ۴ تایی (مرحله ۱)
+    buildTableCards();
+}
+
+async function openSeatModal() {
+    const overlay = document.getElementById("seatOverlay");
+    if (overlay) { overlay.classList.add("open"); lockBodyScroll(); }
+
+    // انتخابات قبلی را پاک کن (اگر میز قبلی انتخاب شده بود)
+    pendingTableNumber = null;
+    pendingChairIds = [];
+
+    await fetchSeatOccupancy();
+
+    // نمایش مرحله ۱ (میزها)
+    document.getElementById("seatPhaseTables").style.display = "block";
+    document.getElementById("seatPhaseChairs").style.display = "none";
+
+    Object.keys(tableCardElements).forEach(function (n) {
+        tableCardElements[n].classList.remove("selected");
+    });
+
+    resetSeatSummary();
+    updateTableCardStates();
+
+    // اگر میز از QR Code قفل شده، به‌طور خودکار کارت میز قفل‌شده را انتخاب می‌کنیم
+    if (isTableLocked && initialTableNumber !== null) {
+        showToast("✅ میز " + initialTableNumber + " از QR Code شما انتخاب شده است", "success");
+
+        pendingTableNumber = initialTableNumber;
+        // انتخاب کارت میز
+        tableCardElements[initialTableNumber].classList.add("selected");
+
+        // غیرفعال کردن کارت‌های دیگر
+        updateTableCardStates();
+
+        // حرکت به مرحله ۲
+        document.getElementById("seatPhaseTables").style.display = "none";
+        document.getElementById("seatPhaseChairs").style.display = "block";
+
+        document.getElementById("chairPhaseTableNum").textContent = initialTableNumber;
+        document.getElementById("chairTableLabel").textContent = "میز " + initialTableNumber;
+
+        buildChairStage(initialTableNumber);
+        updateChairState(initialTableNumber);
+        resetSeatSummary();
+        updateSeatSummary();
+    }
+}
+
+function closeSeatModal() {
+    const overlay = document.getElementById("seatOverlay");
+    if (overlay && overlay.classList.contains("open")) {
+        overlay.classList.remove("open");
+        unlockBodyScroll();
+    }
 }
 
 function confirmSeatSelection() {
-    if (pendingChairIds.length === 0 || pendingTableIndex === null) return;
+    if (pendingChairIds.length === 0 || pendingTableNumber === null) return;
 
     selectedSeat = {
-        tableIndex: pendingTableIndex,
+        tableIndex: pendingTableNumber,
         chairIds: pendingChairIds.slice(),
-        tableLabel: "میز " + pendingTableIndex + " (" + pendingChairIds.length + " صندلی)"
+        tableLabel: "میز " + pendingTableNumber + " (" + pendingChairIds.length + " صندلی)"
     };
 
     sessionStorage.setItem("selectedSeat", JSON.stringify(selectedSeat));
     applySeatSelectionUI();
     closeSeatModal();
+
     showToast(selectedSeat.tableLabel + " با موفقیت رزرو شد. حالا می‌تونی سفارش بدی!", false);
 
     // Now that seating is settled, land them on the menu.
@@ -1296,14 +1438,42 @@ function applySeatSelectionUI() {
 // TOAST
 // ==========================================================
 
-function showToast(message, isError) {
+function showToast(message, type) {
     const toast = document.getElementById("toast");
     const msg = document.getElementById("toastMsg");
     const icon = document.getElementById("toastIcon");
     if (!toast || !msg) { alert(message); return; }
+
     msg.textContent = message;
-    toast.classList.toggle("error", !!isError);
-    if (icon) icon.className = isError ? "bi bi-exclamation-circle-fill" : "bi bi-check-circle-fill";
+
+    // پاک کردن کلاس‌های قبلی
+    toast.classList.remove("error", "success", "warning");
+
+    // تشخیص نوع پیام (backward compatible با boolean)
+    let messageType = "success"; // پیش‌فرض
+    let iconClass = "bi bi-check-circle-fill";
+
+    if (typeof type === "boolean") {
+        // پشتیبانی از کد قدیمی که boolean می‌فرستاد
+        messageType = type ? "error" : "success";
+    } else if (typeof type === "string") {
+        // پشتیبانی از انواع جدید: "success", "error", "warning"
+        messageType = type;
+    }
+
+    // تنظیم کلاس و آیکون بر اساس نوع
+    if (messageType === "error") {
+        toast.classList.add("error");
+        iconClass = "bi bi-exclamation-circle-fill";
+    } else if (messageType === "warning") {
+        toast.classList.add("warning");
+        iconClass = "bi bi-exclamation-triangle-fill";
+    } else {
+        toast.classList.add("success");
+        iconClass = "bi bi-check-circle-fill";
+    }
+
+    if (icon) icon.className = iconClass;
     toast.classList.add("show");
     clearTimeout(toast._hideTimer);
     toast._hideTimer = setTimeout(function () { toast.classList.remove("show"); }, 2600);
@@ -1314,12 +1484,9 @@ function showToast(message, isError) {
 // ORDER TRACKING — full history (list) + per-order detail
 // ==========================================================
 
-const TRACK_STEPS = [
-    { key: "new",                    label: "سفارش ثبت شد",        desc: "سفارش شما با موفقیت دریافت شد" },
-    { key: "cooking",                label: "آماده‌سازی و ارسال",   desc: "آشپزخانه در حال آماده کردن و ارسال سفارشته" },
-    { key: "awaiting_confirmation",  label: "در انتظار تأیید شما", desc: "لطفاً تأیید کن که سفارش رو گرفتی" },
-    { key: "done",                   label: "تحویل شد",            desc: "نوش جان!" }
-];
+// مراحل پیگیری از این‌جا تعریف نمی‌شوند: سرور در هر پاسخ، لیست کامل
+// `steps` (key / label / description / state) را می‌فرستد تا با وضعیت
+// واقعی Backend هرگز ناهماهنگ نباشد.
 
 let trackPollTimer = null;
 
@@ -1332,6 +1499,19 @@ function getOrderHistory() {
 }
 function saveOrderHistory(list) {
     sessionStorage.setItem("orderHistory", JSON.stringify(list));
+}
+
+// توکن پیگیری هر سفارش (فقط در حافظهٔ همین تب؛ پس از Refresh باقی می‌ماند)
+function getOrderToken(orderId) {
+    const entry = getOrderHistory().find(function (o) {
+        return String(o.id) === String(orderId);
+    });
+    return entry && entry.token ? entry.token : null;
+}
+
+function trackingHeaders(orderId) {
+    const token = getOrderToken(orderId);
+    return token ? { "X-Order-Token": token } : {};
 }
 function addOrderToHistory(order) {
     const list = getOrderHistory();
@@ -1419,6 +1599,14 @@ function openTrackDetail(order) {
     if (backBtn) backBtn.style.display = history.length > 1 ? "flex" : "none";
     if (title) title.textContent = "پیگیری سفارش #" + order.id;
 
+    // نمایش واضح شمارهٔ سفارش ثبت‌شده به مشتری
+    const successCard = document.getElementById("orderSuccessCard");
+    const successId = document.getElementById("successOrderId");
+    const successTable = document.getElementById("successTableLabel");
+    if (successCard) successCard.style.display = "block";
+    if (successId) successId.textContent = order.id;
+    if (successTable) successTable.textContent = order.tableLabel || ("میز " + (order.table || "—"));
+
     loadOrderTracking(order.id, order.tableLabel);
     startTrackPolling(order.id, order.tableLabel);
 }
@@ -1487,31 +1675,39 @@ async function loadOrderTracking(orderId, tableLabel) {
     if (errBox) errBox.style.display = "none";
 
     try {
-        const response = await fetch(`/api/orders/${orderId}/`);
+        const response = await fetch(`/api/orders/${orderId}/`, {
+            headers: trackingHeaders(orderId)
+        });
         const data = await response.json();
 
         if (!response.ok) {
+            if (response.status === 404) {
+                stopTrackPolling();
+                if (errBox && errMsg) {
+                    errMsg.textContent = "دسترسی به این سفارش مجاز نیست یا کلید پیگیری معتبر نیست. لطفاً از صفحهٔ ثبت سفارش خود پیگیری کنید.";
+                    errBox.style.display = "flex";
+                }
+                return;
+            }
             throw new Error(data.error || "خطا در دریافت وضعیت سفارش");
         }
 
-        renderTrackSteps(data.status);
+        renderTrackSteps(data.steps, data.status);
         renderConfirmPrompt(orderId, data.status, data.customer_confirmed);
 
         if (infoBox) {
             const statusText = infoBox.querySelector("#trackStatusText");
             const totalText = infoBox.querySelector("#trackTotalText");
-            const labels = {
-                new: "در انتظار تایید", cooking: "در حال آماده‌سازی و ارسال",
-                awaiting_confirmation: "رسیدت رو تأیید کن", done: "نوش جان!", rejected: "سفارش رد شد"
-            };
-            if (statusText) statusText.textContent = labels[data.status] || labels.new;
+            if (statusText) {
+                statusText.textContent = data.status_label || "وضعیت سفارش در حال بررسی است";
+            }
             if (totalText && typeof data.table !== "undefined") {
                 const totalPart = data.total ? Number(data.total).toLocaleString() + " تومان" : "";
                 totalText.textContent = `میز ${data.table}${totalPart ? " • " + totalPart : ""}`;
             }
         }
 
-        if (data.status === "rejected") {
+        if (data.cancelled || data.status === "rejected") {
             stopTrackPolling();
             if (errBox && errMsg) {
                 errMsg.textContent = "متأسفانه سفارش شما رد شد.";
@@ -1579,7 +1775,10 @@ async function confirmOrderReceived(orderId, received) {
     try {
         const response = await fetch(`/api/orders/${orderId}/confirm/`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", "X-CSRFToken": csrftoken },
+            headers: Object.assign(
+                { "Content-Type": "application/json", "X-CSRFToken": csrftoken },
+                trackingHeaders(orderId)
+            ),
             body: JSON.stringify({ received: received })
         });
         const data = await response.json();
@@ -1595,13 +1794,18 @@ async function confirmOrderReceived(orderId, received) {
     }
 }
 
-function renderTrackSteps(status) {
+// رندر مراحل بر اساس پاسخ سرور؛ وضعیت ناشناخته/لغوشده صفحه را خراب نمی‌کند.
+function renderTrackSteps(steps, status) {
     const box = document.getElementById("trackSteps");
     if (!box) return;
     box.innerHTML = "";
 
-    if (status === "rejected") {
-        TRACK_STEPS.forEach(function (step, i) {
+    if (!Array.isArray(steps) || steps.length === 0) return;
+
+    const cancelled = status === "rejected";
+
+    if (cancelled) {
+        steps.forEach(function (step, i) {
             const el = document.createElement("div");
             el.className = "track-step";
             const dotStyle = i === 0 ? '' : 'background:#C2495B;border-color:#C2495B;color:#fff;';
@@ -1609,7 +1813,7 @@ function renderTrackSteps(status) {
                 <div class="track-dot" style="${dotStyle}"><i class="bi ${i === 0 ? 'bi-check-lg' : 'bi-x-lg'}"></i></div>
                 <div class="track-info">
                     <h5 style="${i === 0 ? '' : 'color:#C2495B;'}">${i === 0 ? step.label : 'لغو شد'}</h5>
-                    <p>${i === 0 ? step.desc : ''}</p>
+                    <p>${i === 0 ? (step.description || '') : ''}</p>
                 </div>
             `;
             if (i === 0) el.classList.add("done");
@@ -1618,21 +1822,22 @@ function renderTrackSteps(status) {
         return;
     }
 
-    const currentIndex = TRACK_STEPS.findIndex(s => s.key === status);
-
-    TRACK_STEPS.forEach(function (step, i) {
+    steps.forEach(function (step) {
         const el = document.createElement("div");
         el.className = "track-step";
-        if (currentIndex >= 0) {
-            if (i < currentIndex) el.classList.add("done");
-            else if (i === currentIndex) el.classList.add("active");
-        }
+
+        if (step.state === "done") el.classList.add("done");
+        else if (step.state === "current") el.classList.add("active");
+
+        const iconClass = step.state === "done"
+            ? "bi-check-lg"
+            : (step.state === "current" ? "bi-record-circle" : "bi-circle");
 
         el.innerHTML = `
-            <div class="track-dot"><i class="bi ${i <= currentIndex ? 'bi-check-lg' : 'bi-circle'}"></i></div>
+            <div class="track-dot"><i class="bi ${iconClass}"></i></div>
             <div class="track-info">
-                <h5>${step.label}</h5>
-                <p>${step.desc}</p>
+                <h5>${step.label || ''}</h5>
+                <p>${step.description || ''}</p>
             </div>
         `;
         box.appendChild(el);

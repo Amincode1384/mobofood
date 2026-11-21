@@ -2,6 +2,23 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 KITCHEN_GROUP = "kitchen"
+ROBOT_GROUP_PREFIX = "robot_"
+
+
+def robot_group_name(robot_id):
+    """WebSocket group name for one robot."""
+    return f"{ROBOT_GROUP_PREFIX}{robot_id}"
+
+
+def broadcast_robot_command(robot_id, command):
+    """Send a movement command to the robot's WebSocket group."""
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return
+    async_to_sync(channel_layer.group_send)(
+        robot_group_name(robot_id),
+        {"type": "robot.command", "command": command},
+    )
 
 
 def broadcast_order_event(event_name, order_data):

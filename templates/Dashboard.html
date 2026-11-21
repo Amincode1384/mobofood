@@ -2,6 +2,7 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>آشپزخانه | Midnight Kitchen</title>
@@ -72,6 +73,16 @@
         </div>
         <div class="kh-col-body" id="colSent">
             <div class="kh-empty">سفارشی در مسیر ارسال نیست</div>
+        </div>
+    </section>
+
+    <section class="kh-column" data-column="missions">
+        <div class="kh-col-head col-missions">
+            <i class="bi bi-hexagon-fill"></i> مأموریت‌های ربات
+            <span class="kh-count" id="countMissions">0</span>
+        </div>
+        <div class="kh-col-body" id="colMissions">
+            <div class="kh-empty">مأموریتی برای ربات وجود ندارد</div>
         </div>
     </section>
 

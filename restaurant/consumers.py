@@ -13,6 +13,13 @@ class KitchenConsumer(AsyncJsonWebsocketConsumer):
     """
 
     async def connect(self):
+        # فقط کارکنان واردشده می‌توانند به کانال زندهٔ آشپزخانه وصل شوند؛
+        # پیام‌های این کانال شامل نام و تلفن مشتری است.
+        user = self.scope.get("user")
+        if user is None or not user.is_authenticated or not user.is_staff:
+            await self.close(code=4403)
+            return
+
         await self.channel_layer.group_add(KITCHEN_GROUP, self.channel_name)
         await self.accept()
 
@@ -24,7 +31,10 @@ class KitchenConsumer(AsyncJsonWebsocketConsumer):
         # reconnect, in case events were missed while offline.
         if content.get("action") == "request_snapshot":
             orders = await self._get_active_orders()
-            await self.send_json({"event": "snapshot", "orders": orders})
+            missions = await self._get_active_missions()
+            await self.send_json(
+                {"event": "snapshot", "orders": orders, "missions": missions}
+            )
 
     @database_sync_to_async
     def _get_active_orders(self):
@@ -36,6 +46,29 @@ class KitchenConsumer(AsyncJsonWebsocketConsumer):
             status__in=["new", "cooking", "awaiting_confirmation", "ready"]
         ).order_by("-id")
         return [serialize_order(o) for o in orders]
+
+    @database_sync_to_async
+    def _get_active_missions(self):
+        from .models import Mission
+
+        missions = Mission.objects.filter(
+            status__in=["pending", "assigned", "in_progress"]
+        ).order_by("-created_at")
+        return [
+            {
+                "mission_code": m.mission_code,
+                "mission_uid": str(m.mission_uid),
+                "status": m.status,
+                "destination_table": m.destination_table,
+                "robot_id": m.robot_id,
+                "order_id": m.order_id,
+                "order_table": m.order.table,
+                "created_at": m.created_at.isoformat(),
+                "started_at": m.started_at.isoformat() if m.started_at else None,
+                "completed_at": m.completed_at.isoformat() if m.completed_at else None,
+            }
+            for m in missions
+        ]
 
     # ---- group event handlers (type == "kitchen.event") ----
     async def kitchen_event(self, event):

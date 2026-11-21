@@ -1,0 +1,48 @@
+# One Daphne process + one dedicated timer watcher + Redis channel layer.
+# Copy .env.example -> .env and fill real secrets before `docker compose up`.
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    build: .
+    env_file: .env
+    environment:
+      DB_NAME: /app/data/db.sqlite3
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - media_data:/app/media
+      - static_data:/app/staticfiles
+    restart: unless-stopped
+
+  timer-watcher:
+    build: .
+    env_file: .env
+    environment:
+      DB_NAME: /app/data/db.sqlite3
+    command: ["python", "manage.py", "run_timer_watcher"]
+    depends_on:
+      web:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  media_data:
+  static_data:

@@ -1,0 +1,222 @@
+{% load static %}
+<div class="mm-wrap mm-wrap--embedded">
+        <section class="mm-card">
+            <h2 class="mm-title">
+                <i class="bi bi-plus-circle" id="mmFormIcon"></i>
+                <span id="mmFormTitleText">افزودن غذای جدید</span>
+                <span class="mm-edit-chip" id="mmEditChip" hidden>در حال ویرایش</span>
+            </h2>
+
+            <form id="mmForm" class="mm-form" novalidate>
+                {% csrf_token %}
+
+                <div class="mm-error-summary" id="mmErrorSummary" role="alert" tabindex="-1" hidden></div>
+
+                <div class="mm-field">
+                    <label for="mmName">نام غذا <span class="mm-req">*</span></label>
+                    <input id="mmName" name="name" type="text" maxlength="100" required
+                           autocomplete="off" placeholder="مثلاً: پیتزا پپرونی">
+                    <p class="mm-error" data-for="name"></p>
+                </div>
+
+                <div class="mm-field mm-add-only">
+                    <label for="mmCategory">دسته‌بندی <span class="mm-req">*</span></label>
+                    <select id="mmCategory" name="category_id" required>
+                        <option value="">یک دسته انتخاب کنید</option>
+                        {% for category in categories %}
+                        <option value="{{ category.id }}">{{ category.icon }} {{ category.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <p class="mm-error" data-for="category_id"></p>
+                </div>
+
+                <div class="mm-row2">
+                    <div class="mm-field">
+                        <label for="mmPrice">قیمت (تومان) <span class="mm-req">*</span></label>
+                        <input id="mmPrice" name="price" type="text" inputmode="numeric" dir="ltr"
+                               required placeholder="120000">
+                        <p class="mm-error" data-for="price"></p>
+                    </div>
+
+                    <div class="mm-field">
+                        <label for="mmStock">موجودی قابل سفارش <span class="mm-req">*</span></label>
+                        <input id="mmStock" name="stock" type="text" inputmode="numeric" dir="ltr"
+                               required placeholder="0">
+                        <p class="mm-hint">۰ یعنی فعلاً ناموجود؛ منوی مشتری همین را نشان می‌دهد.</p>
+                        <p class="mm-error" data-for="stock"></p>
+                    </div>
+                </div>
+
+                <div class="mm-field">
+                    <label for="mmDesc">توضیحات <span class="mm-opt">(اختیاری)</span></label>
+                    <textarea id="mmDesc" name="description" rows="3" maxlength="1000"
+                              placeholder="مواد اولیه، حجم، نکته‌های سفارش"></textarea>
+                    <p class="mm-error" data-for="description"></p>
+                </div>
+
+                <div class="mm-field mm-add-only">
+                    <label for="mmImage">تصویر غذا <span class="mm-opt">(اختیاری)</span></label>
+                    <input id="mmImage" name="image" type="file" accept="image/jpeg,image/png,image/webp">
+                    <p class="mm-hint">JPG، PNG یا WebP — حداکثر ۵ مگابایت.</p>
+                    <p class="mm-error" data-for="image"></p>
+
+                    <div class="mm-preview" id="mmPreview" hidden>
+                        <img id="mmPreviewImg" alt="پیش‌نمایش تصویر غذا">
+                        <button type="button" id="mmImageClear" class="mm-btn mm-btn-ghost">
+                            <i class="bi bi-x-lg"></i> حذف تصویر
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mm-confirm" id="mmConfirm" hidden>
+                    <p>تغییرات ذخیره نشده‌اند. بسته شود؟</p>
+                    <div class="mm-confirm-actions">
+                        <button type="button" class="mm-btn mm-btn-ghost" data-confirm="discard">بستن بدون ذخیره</button>
+                        <button type="button" class="mm-btn mm-btn-ghost" data-confirm="keep">ادامهٔ ویرایش</button>
+                    </div>
+                </div>
+
+                <div class="mm-actions">
+                    <button type="submit" id="mmSubmit" class="mm-btn mm-btn-primary">
+                        <i class="bi bi-plus-lg"></i> افزودن غذا
+                    </button>
+                    <button type="button" id="mmCancelEdit" class="mm-btn mm-btn-ghost" hidden>
+                        انصراف
+                    </button>
+                </div>
+
+                <p class="mm-msg" id="mmMessage" role="alert" aria-live="polite" hidden></p>
+            </form>
+        </section>
+
+        <section class="mm-card">
+            <h2 class="mm-title">
+                <i class="bi bi-tags"></i>
+                دسته‌بندی‌ها
+                <span class="mm-total" id="mmCategoryCount">{{ categories|length }}</span>
+            </h2>
+
+            <button type="button" id="mmCategoryToggle" class="mm-btn mm-btn-ghost mm-cat-toggle">
+                <i class="bi bi-plus-lg"></i> افزودن دسته
+            </button>
+
+            <form id="mmCategoryForm" class="mm-form" novalidate hidden>
+                <div class="mm-field">
+                    <label for="mmCategoryName">نام دسته <span class="mm-req">*</span></label>
+                    <input id="mmCategoryName" type="text" maxlength="100" autocomplete="off"
+                           placeholder="مثلاً: دسر">
+                    <p class="mm-error" data-for="new_category"></p>
+                </div>
+
+                <div class="mm-field">
+                    <label for="mmCategoryIcon">آیکن <span class="mm-opt">(اختیاری)</span></label>
+                    <input id="mmCategoryIcon" type="text" maxlength="8" placeholder="🍰">
+                </div>
+
+                <div class="mm-actions">
+                    <button type="submit" id="mmCategorySubmit" class="mm-btn mm-btn-primary">
+                        ثبت دسته
+                    </button>
+                    <button type="button" id="mmCategoryCancel" class="mm-btn mm-btn-ghost">
+                        انصراف
+                    </button>
+                </div>
+            </form>
+
+            <ul class="mm-cat-list" id="mmCategoryList">
+                {% for category in categories %}
+                <li data-category-id="{{ category.id }}">
+                    <span class="mm-cat-name">{{ category.icon }} {{ category.name }}</span>
+                    <span class="mm-count">{{ category.foods.all|length }}</span>
+                </li>
+                {% empty %}
+                <li class="mm-empty" id="mmCategoryEmpty">هنوز دسته‌بندی‌ای وجود ندارد.</li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        <section class="mm-card">
+            <h2 class="mm-title">
+                <i class="bi bi-list-ul"></i>
+                منوی فعلی
+                <span class="mm-total" id="mmTotal">{{ food_count }}</span>
+            </h2>
+
+            <div id="mmList">
+                {% for category in categories %}
+                <section class="mm-group" data-category-id="{{ category.id }}">
+                    <h3>
+                        <span class="mm-group-icon">{{ category.icon }}</span>
+                        <span class="mm-group-name">{{ category.name }}</span>
+                        <span class="mm-count">{{ category.foods.all|length }}</span>
+                    </h3>
+
+                    <ul class="mm-rows">
+                        {% for food in category.foods.all %}
+                        <li class="mm-row{% if not food.is_active %} is-inactive{% endif %}" data-id="{{ food.id }}"
+                            data-name="{{ food.name }}"
+                            data-price="{{ food.price }}"
+                            data-stock="{{ food.stock }}"
+                            data-active="{% if food.is_active %}1{% else %}0{% endif %}"
+                            data-description="{{ food.description }}">
+                            <div class="mm-thumb">
+                                {% if food.image %}
+                                <img src="{{ food.image.url }}" alt="{{ food.name }}">
+                                {% else %}
+                                <span>🍽</span>
+                                {% endif %}
+                            </div>
+                            <div class="mm-info">
+                                <strong>{{ food.name }}</strong>
+                                {% if food.description %}<small>{{ food.description|truncatechars:70 }}</small>{% endif %}
+                            </div>
+                            <div class="mm-price">{{ food.price }} تومان</div>
+                            <span class="mm-badge {% if food.stock %}in{% else %}out{% endif %}" data-badge>
+                                {% if food.stock %}موجود{% else %}ناموجود{% endif %}
+                            </span>
+                            <div class="mm-row-actions">
+                                <button type="button" class="mm-active-pill"
+                                        role="switch"
+                                        aria-checked="{% if food.is_active %}true{% else %}false{% endif %}"
+                                        aria-label="نمایش «{{ food.name }}» در منوی مشتری"
+                                        data-active-switch="{{ food.id }}">
+                                    <i class="bi {% if food.is_active %}bi-eye{% else %}bi-eye-slash{% endif %}"></i>
+                                    <span data-active-text>{% if food.is_active %}در منو{% else %}خارج از منو{% endif %}</span>
+                                </button>
+                                <button type="button" class="mm-switch"
+                                        role="switch"
+                                        aria-checked="{% if food.stock %}true{% else %}false{% endif %}"
+                                        aria-label="تغییر وضعیت موجودی {{ food.name }}"
+                                        data-stock-switch="{{ food.id }}">
+                                    <span class="mm-switch-track"><span class="mm-switch-thumb"></span></span>
+                                </button>
+                                <button type="button" class="mm-edit-btn" data-edit="{{ food.id }}"
+                                        aria-label="ویرایش {{ food.name }}">
+                                    <i class="bi bi-pencil"></i> ویرایش
+                                </button>
+                                <button type="button" class="mm-del-btn" data-delete="{{ food.id }}"
+                                        aria-label="حذف {{ food.name }}">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                            <div class="mm-confirm-strip" data-confirm-strip hidden>
+                                <span>«{{ food.name }}» حذف شود؟ این کار برگشت‌پذیر نیست.</span>
+                                <button type="button" class="mm-btn mm-btn-danger" data-confirm-delete="{{ food.id }}">
+                                    حذف قطعی
+                                </button>
+                                <button type="button" class="mm-btn mm-btn-ghost" data-cancel-delete>
+                                    انصراف
+                                </button>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </section>
+                {% empty %}
+                <p class="mm-empty" id="mmEmpty">
+                    هنوز دسته‌بندی‌ای ساخته نشده است. با «دستهٔ جدید بساز» شروع کنید.
+                </p>
+                {% endfor %}
+            </div>
+        </section>
+</div>

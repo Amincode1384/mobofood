@@ -1,0 +1,147 @@
+"""
+WebSocket consumer for waiter robots.
+
+Connection:  ws/robots/<robot_id>/?token=<ROBOT_API_TOKEN>
+Each robot is placed in its own group (robot_<robot_id>) and can only ever
+receive commands addressed to that robot_id. Inbound messages are status
+reports / acknowledgements for commands previously sent to that robot.
+
+Auth: a shared secret ROBOT_API_TOKEN from settings (env in production), plus
+the URL robot_id must match the token's robot scope. If no token is configured,
+connections are rejected (fail closed).
+"""
+
+import hmac
+from datetime import datetime, timezone as dt_timezone
+
+from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from channels.db import database_sync_to_async
+
+from django.conf import settings
+from django.core.exceptions import ValidationError
+
+from .events import robot_group_name
+from . import mission_statuses as mission_status
+from .models import Mission
+
+
+class RobotConsumer(AsyncJsonWebsocketConsumer):
+    async def connect(self):
+        self.robot_id = self.scope["url_route"]["kwargs"]["robot_id"]
+        if not self._authenticate():
+            await self.close(code=4401)
+            return
+        self.group_name = robot_group_name(self.robot_id)
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        await self.send_json({"event": "connected", "robot_id": self.robot_id})
+
+    def _authenticate(self):
+        expected = getattr(settings, "ROBOT_API_TOKEN", "")
+        if not expected:
+            return False
+        token = self.scope.get("query_string", b"").decode().strip()
+        # Accept ?token=... or a bare token in the query string.
+        if token.startswith("token="):
+            token = token.split("=", 1)[1]
+        return hmac.compare_digest(token, str(expected))
+
+    async def disconnect(self, close_code):
+        if hasattr(self, "group_name"):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def robot_command(self, event):
+        """Forward a movement command to this robot only."""
+        await self.send_json({"event": "command", "command": event["command"]})
+
+    async def receive_json(self, content, **kwargs):
+        """Handle robot status/ack reports."""
+        event = content.get("event") or content.get("type")
+        if event in ("ack", "status", "reject", "completed"):
+            command_id = content.get("command_id")
+            status = (content.get("status") or event).lower()
+            await self._handle_ack(command_id, status, content)
+        elif event == "ping":
+            await self.send_json({"event": "pong"})
+
+    async def _handle_ack(self, command_id, status, content):
+        from .robot_transport import (
+            WrongCommandIdError, DuplicateResponseError, get_robot_transport,
+        )
+
+        mission_uid = content.get("mission_id") or content.get("mission_uid")
+        if not mission_uid:
+            await self.send_json({"event": "error", "code": "missing_mission_id"})
+            return
+
+        mission = await self._get_mission(mission_uid)
+        if mission is None:
+            await self.send_json({"event": "error", "code": "mission_not_found"})
+            return
+
+        # Robot may only report on its own mission.
+        if str(mission.robot_id or "") != self.robot_id:
+            await self.send_json({"event": "error", "code": "robot_scope_violation"})
+            return
+
+        transport = get_robot_transport()
+        previous = transport.outcome_for(mission_uid)
+        if previous is not None:
+            if str(previous.command_id) != str(command_id):
+                await self.send_json({"event": "error", "code": "wrong_command_id"})
+                return
+            # «sent» = فرمان فرستاده شده اما هنوز تأییدنشده ⇒ تأییدِ اولیهٔ ربات برای همین فرمان است؛ ادامه بده.
+            # هر وضعیت نهایی (accepted/rejected/completed/failed/timeout/disconnected) ⇒ پاسخ تکراری است.
+            if previous.status != "sent":
+                await self.send_json({"event": "error", "code": "duplicate_response"})
+                return
+
+        outcome = transport.acknowledge(
+            command_id=command_id, robot_id=self.robot_id, status=status,
+            error_code=content.get("error_code"),
+            error_message=content.get("error_message"),
+        )
+        if hasattr(transport, "record_for_mission"):
+            transport.record_for_mission(mission_uid, outcome)
+
+        new_status = self._map_status(status, outcome)
+        if new_status and mission_status.can_transition(mission.status, new_status):
+            await self._update_mission(mission_uid, new_status, self.robot_id)
+
+        await self.send_json({
+            "event": "ack_received", "command_id": str(command_id),
+            "status": status, "mission_status": new_status,
+        })
+
+    @staticmethod
+    def _map_status(status, outcome):
+        s = str(status).lower()
+        if s in ("accepted", "received"):
+            return mission_status.STATUS_ASSIGNED
+        if s in ("in_progress", "moving", "started"):
+            return mission_status.STATUS_IN_PROGRESS
+        if s in ("completed", "delivered", "done"):
+            return mission_status.STATUS_COMPLETED
+        if s in ("rejected",):
+            return mission_status.STATUS_FAILED
+        if s in ("failed", "error"):
+            return mission_status.STATUS_FAILED
+        return None
+
+    @database_sync_to_async
+    def _get_mission(self, mission_uid):
+        try:
+            return Mission.objects.get(mission_uid=mission_uid)
+        except (Mission.DoesNotExist, ValueError, ValidationError):
+            return None
+
+    @database_sync_to_async
+    def _update_mission(self, mission_uid, new_status, robot_id):
+        try:
+            m = Mission.objects.get(mission_uid=mission_uid)
+        except Mission.DoesNotExist:
+            return
+        m.status = new_status
+        if new_status == mission_status.STATUS_ASSIGNED and not m.robot_id:
+            m.robot_id = robot_id
+        m.save(update_fields=["status", "robot_id"])
