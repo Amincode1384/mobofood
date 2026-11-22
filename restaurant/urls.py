@@ -6,6 +6,7 @@ urlpatterns = [
     # Pages
     path("", views.customer, name="customer"),
     path("dashboard/", views.dashboard, name="dashboard"),
+    path("dashboard/errors/", views.system_errors, name="system_errors"),
     path("manage/menu/", views.menu_management, name="menu_management"),
     path(
         "order/<int:id>/",

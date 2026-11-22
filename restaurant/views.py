@@ -28,6 +28,7 @@ from .models import (
     can_replace_mission_for_order,
 )
 from .events import broadcast_order_event, broadcast_order_removed
+from .error_logs import SystemErrorLog, LEVEL_CHOICES, SOURCE_CHOICES
 from .validators import validate_optional_phone, validate_table_with_signature
 from .qr_generator import (
     verify_table_signature,
@@ -249,6 +250,82 @@ def dashboard(request):
         context["food_count"] = Food.objects.count()
 
     return render(request, "dashboard.html", context)
+
+
+@user_passes_test(lambda user: user.is_staff, login_url="/admin/login/")
+def system_errors(request):
+    """
+    داشبورد گزارش خطاهای سیستم (SystemErrorLog).
+
+    فقط برای کارکنان (is_staff). جدول RTL با فیلتر روی:
+    level، source، order_uid، mission_uid، robot_id و بازهٔ تاریخ.
+    حداکثر ۲۰۰ ردیف جدید نمایش داده می‌شود.
+    """
+    from django.utils.dateparse import parse_date
+
+    rows = SystemErrorLog.objects.all()
+
+    level = request.GET.get("level", "").strip()
+    source = request.GET.get("source", "").strip()
+    order_uid = request.GET.get("order_uid", "").strip()
+    mission_uid = request.GET.get("mission_uid", "").strip()
+    robot_id = request.GET.get("robot_id", "").strip()
+    date_from = request.GET.get("date_from", "").strip()
+    date_to = request.GET.get("date_to", "").strip()
+
+    # فقط مقادیر معتبر choices اعمال می‌شوند (بدون خطا برای ورودی عجیب).
+    if level in dict(LEVEL_CHOICES):
+        rows = rows.filter(level=level)
+    if source in dict(SOURCE_CHOICES):
+        rows = rows.filter(source=source)
+    if order_uid:
+        rows = rows.filter(order_uid=order_uid)
+    if mission_uid:
+        rows = rows.filter(mission_uid=mission_uid)
+    if robot_id:
+        rows = rows.filter(robot_id__icontains=robot_id)
+
+    # فیلتر تاریخ فقط با ورودی معتبر ISO (YYYY-MM-DD).
+    if date_from:
+        parsed = parse_date(date_from)
+        if parsed is not None:
+            rows = rows.filter(created_at__date__gte=parsed)
+    if date_to:
+        parsed = parse_date(date_to)
+        if parsed is not None:
+            rows = rows.filter(created_at__date__lte=parsed)
+
+    level_counts = {value: 0 for value, _label in LEVEL_CHOICES}
+    for item in rows.values("level").annotate(n=models.Count("id")):
+        level_counts[item["level"]] = item["n"]
+
+    total = rows.count()
+    page_rows = list(rows[:200])
+
+    level_stats = [
+        (value, label, level_counts[value]) for value, label in LEVEL_CHOICES
+    ]
+
+    context = {
+        "rows": page_rows,
+        "total": total,
+        "shown": len(page_rows),
+        "truncated": total > len(page_rows),
+        "level_counts": level_counts,
+        "level_stats": level_stats,
+        "level_choices": LEVEL_CHOICES,
+        "source_choices": SOURCE_CHOICES,
+        "f": {
+            "level": level,
+            "source": source,
+            "order_uid": order_uid,
+            "mission_uid": mission_uid,
+            "robot_id": robot_id,
+            "date_from": date_from,
+            "date_to": date_to,
+        },
+    }
+    return render(request, "system_errors.html", context)
 
 
 def order_tracking(request, id):

@@ -21,6 +21,11 @@ from restaurant.mission_statuses import (
     _validate_destination_table,
 )
 
+# SystemErrorLog در فایل جداگانهٔ error_logs.py ساخته شده و از همین‌جا
+# معرفی می‌شود تا Django آن را به‌عنوان مدل اپ restaurant بشناسد و
+# migration برایش بسازد.
+from restaurant.error_logs import SystemErrorLog  # noqa: F401
+
 
 # پیش‌فرض شناسهٔ مأموریت: MSN-XXXXXX (شش رقم ترتیبی)
 # یکتایی در سطح دیتابیس نیز تضمین می‌شود.

@@ -26,6 +26,9 @@
                 aria-controls="mmOverlay" aria-expanded="false">
             <i class="bi bi-journal-text"></i> مدیریت منو
         </button>
+        <a class="kh-nav-link" href="{% url 'system_errors' %}">
+            <i class="bi bi-exclamation-triangle"></i> گزارش خطاها
+        </a>
         {% endif %}
         <span class="kh-clock mono" id="headerClock">--:--:--</span>
         <span class="kh-conn" id="connStatus">

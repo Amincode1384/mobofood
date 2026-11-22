@@ -23,6 +23,7 @@ from django.utils import timezone
 
 from .models import Mission
 from . import mission_statuses as mission_status
+from .error_logs import record_system_error
 from .movement_command import (
     build_move_command, InvalidDestinationError, CommandValidationError,
 )
@@ -30,6 +31,24 @@ from .robot_transport import (
     get_robot_transport, RobotTransportError, RobotDisconnectedError,
     RobotTimeoutError, RobotRejectedCommandError,
 )
+
+
+def _record_transport_failure(exc, code, mission):
+    """
+    ثبت شکست ارسال در SystemErrorLog (لایهٔ mission).
+
+    کاملاً fail-open است: اگر ثبت ممکن نشد، استثنای اصلی DispatchError
+    همچنان بالا می‌رود و رفتار view تغییری نمی‌کند.
+    """
+    record_system_error(
+        level="ERROR",
+        source="mission",
+        code=code,
+        message=str(exc),
+        mission_uid=str(mission.mission_uid),
+        robot_id=getattr(mission, "robot_id", "") or "",
+        path="restaurant.mission_dispatch",
+    )
 
 
 class DispatchError(Exception):
@@ -186,6 +205,7 @@ def dispatch_mission(*, mission_uid=None, mission_code=None, robot_id=None,
                 error_type="timeout",
                 error_message=str(exc)[:500],
             )
+        _record_transport_failure(exc, "robot_timeout", mission)
         raise DispatchError(
             "پاسخ ربات دریافت نشد (Timeout). وضعیت فرمان نامشخص است؛ ارسال مجدد خودکار انجام نشد.",
             code="robot_timeout", http_status=504,
@@ -197,6 +217,7 @@ def dispatch_mission(*, mission_uid=None, mission_code=None, robot_id=None,
                 error_type="robot_communication_failed",
                 error_message=str(exc)[:500],
             )
+        _record_transport_failure(exc, "robot_disconnected", mission)
         raise DispatchError(str(exc), code="robot_disconnected", http_status=503)
     except RobotRejectedCommandError as exc:
         with transaction.atomic():
@@ -205,6 +226,7 @@ def dispatch_mission(*, mission_uid=None, mission_code=None, robot_id=None,
                 error_type="robot_rejected",
                 error_message=str(exc)[:500],
             )
+        _record_transport_failure(exc, "robot_rejected", mission)
         raise DispatchError(str(exc), code="robot_rejected", http_status=409)
     except RobotTransportError as exc:
         with transaction.atomic():
@@ -213,6 +235,7 @@ def dispatch_mission(*, mission_uid=None, mission_code=None, robot_id=None,
                 error_type="robot_communication_failed",
                 error_message=str(exc)[:500],
             )
+        _record_transport_failure(exc, "transport_error", mission)
         raise DispatchError(str(exc), code="transport_error", http_status=503)
 
     received = bool(outcome.received)

@@ -126,9 +126,38 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # گزارش خطاهای سیستم: استثناهای پردازش‌نشده و پاسخ‌های 5xx را
+    # در SystemErrorLog ثبت می‌کند (fail-open؛ هرگز درخواست را نمی‌شکند).
+    "restaurant.error_logging.SystemErrorReportingMiddleware",
 ]
 
 ROOT_URLCONF = 'RestaurantRobot.urls'
+
+# ---------------------------------------------------------
+# Logging — گزارش خطاهای سیستم (SystemErrorLog)
+# ---------------------------------------------------------
+# ساختار پیش‌فرض Django برای لاگر django دست‌نخورده می‌ماند (dictConfig
+# اول DEFAULT_LOGGING را اعمال می‌کند و این پیکربندی فقط اضافه می‌کند).
+# لاگر restaurant به handler دیتابیس وصل است تا WARNING+ علاوه بر
+# logging استاندارد، در جدول SystemErrorLog هم ثبت شود (با sanitize و
+# deduplicate و fail-open — شکست ثبت، درخواست اصلی را نمی‌شکند).
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "system_errors": {
+            "class": "restaurant.error_logging.SystemErrorDatabaseHandler",
+            "level": "WARNING",
+        },
+    },
+    "loggers": {
+        "restaurant": {
+            "handlers": ["system_errors"],
+            "level": "WARNING",
+            "propagate": True,
+        },
+    },
+}
 
 TEMPLATES = [
     {

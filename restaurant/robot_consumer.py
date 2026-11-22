@@ -22,6 +22,7 @@ from django.core.exceptions import ValidationError
 
 from .events import robot_group_name
 from . import mission_statuses as mission_status
+from .error_logs import record_system_error
 from .models import Mission
 
 
@@ -56,6 +57,19 @@ class RobotConsumer(AsyncJsonWebsocketConsumer):
 
     async def receive_json(self, content, **kwargs):
         """Handle robot status/ack reports."""
+        try:
+            await self._handle_inbound(content, **kwargs)
+        except Exception as exc:
+            # ثبت خطا در SystemErrorLog؛ سپس همان رفتار قبلی (بالا رفتن
+            # استثنا و بسته‌شدن اتصال) بدون تغییر حفظ می‌شود.
+            await self._record_error(
+                level="ERROR",
+                code="websocket_receive_failed",
+                message=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
+    async def _handle_inbound(self, content, **kwargs):
         event = content.get("event") or content.get("type")
         if event in ("ack", "status", "reject", "completed"):
             command_id = content.get("command_id")
@@ -64,6 +78,32 @@ class RobotConsumer(AsyncJsonWebsocketConsumer):
         elif event == "ping":
             await self.send_json({"event": "pong"})
 
+    async def _reject(self, code, message, mission_uid=""):
+        """
+        پاسخ خطا به ربات (همان JSON قبلی) + ثبت WARNING در SystemErrorLog.
+        """
+        await self._record_error(
+            level="WARNING",
+            code=code,
+            message=message or code,
+            mission_uid=mission_uid or "",
+        )
+        await self.send_json({"event": "error", "code": code})
+
+    @database_sync_to_async
+    def _record_error(self, *, level, code, message, mission_uid=""):
+        """ثبت خطای لایهٔ WebSocket در SystemErrorLog (fail-open)."""
+        robot_id = getattr(self, "robot_id", "") or ""
+        record_system_error(
+            level=level,
+            source="websocket",
+            code=code,
+            message=message,
+            mission_uid=mission_uid or "",
+            robot_id=robot_id,
+            path=f"ws/robots/{robot_id}",
+        )
+
     async def _handle_ack(self, command_id, status, content):
         from .robot_transport import (
             WrongCommandIdError, DuplicateResponseError, get_robot_transport,
@@ -71,29 +111,47 @@ class RobotConsumer(AsyncJsonWebsocketConsumer):
 
         mission_uid = content.get("mission_id") or content.get("mission_uid")
         if not mission_uid:
-            await self.send_json({"event": "error", "code": "missing_mission_id"})
+            await self._reject(
+                "missing_mission_id", "گزارش ربات شناسهٔ مأموریت ندارد."
+            )
             return
 
         mission = await self._get_mission(mission_uid)
         if mission is None:
-            await self.send_json({"event": "error", "code": "mission_not_found"})
+            await self._reject(
+                "mission_not_found",
+                "مأموریت موردنظر پیدا نشد.",
+                mission_uid=mission_uid,
+            )
             return
 
         # Robot may only report on its own mission.
         if str(mission.robot_id or "") != self.robot_id:
-            await self.send_json({"event": "error", "code": "robot_scope_violation"})
+            await self._reject(
+                "robot_scope_violation",
+                "ربات فقط می‌تواند دربارهٔ مأموریت خودش گزارش دهد.",
+                mission_uid=str(mission.mission_uid),
+            )
             return
 
         transport = get_robot_transport()
         previous = transport.outcome_for(mission_uid)
         if previous is not None:
             if str(previous.command_id) != str(command_id):
-                await self.send_json({"event": "error", "code": "wrong_command_id"})
+                await self._reject(
+                    "wrong_command_id",
+                    "command_id با فرمان قبلی همخوانی ندارد.",
+                    mission_uid=mission_uid,
+                )
                 return
             # «sent» = فرمان فرستاده شده اما هنوز تأییدنشده ⇒ تأییدِ اولیهٔ ربات برای همین فرمان است؛ ادامه بده.
             # هر وضعیت نهایی (accepted/rejected/completed/failed/timeout/disconnected) ⇒ پاسخ تکراری است.
             if previous.status != "sent":
-                await self.send_json({"event": "error", "code": "duplicate_response"})
+                await self._reject(
+                    "duplicate_response",
+                    "پاسخ تکراری برای همین مأموریت.",
+                    mission_uid=mission_uid,
+                )
                 return
 
         outcome = transport.acknowledge(

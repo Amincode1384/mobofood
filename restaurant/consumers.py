@@ -27,6 +27,15 @@ class KitchenConsumer(AsyncJsonWebsocketConsumer):
         await self.channel_layer.group_discard(KITCHEN_GROUP, self.channel_name)
 
     async def receive_json(self, content, **kwargs):
+        try:
+            await self._handle_inbound(content, **kwargs)
+        except Exception as exc:
+            # ثبت خطا در SystemErrorLog؛ رفتار قبلی (بالا رفتن استثنا)
+            # بدون تغییر حفظ می‌شود. fail-open.
+            await self._record_error(f"{type(exc).__name__}: {exc}")
+            raise
+
+    async def _handle_inbound(self, content, **kwargs):
         # The only inbound message we need: a fresh snapshot after a
         # reconnect, in case events were missed while offline.
         if content.get("action") == "request_snapshot":
@@ -35,6 +44,19 @@ class KitchenConsumer(AsyncJsonWebsocketConsumer):
             await self.send_json(
                 {"event": "snapshot", "orders": orders, "missions": missions}
             )
+
+    @database_sync_to_async
+    def _record_error(self, message):
+        """ثبت خطای کانال آشپزخانه در SystemErrorLog (fail-open)."""
+        from .error_logs import record_system_error
+
+        record_system_error(
+            level="ERROR",
+            source="websocket",
+            code="kitchen_receive_failed",
+            message=message,
+            path="ws/kitchen",
+        )
 
     @database_sync_to_async
     def _get_active_orders(self):
