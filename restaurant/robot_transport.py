@@ -211,7 +211,9 @@ class ChannelRobotTransport(RobotTransport):
         try:
             broadcast_robot_command(robot_id, command)
         except Exception as exc:
-            raise RobotDisconnectedError(f"failed to deliver command: {exc}") from exc
+            raise RobotDisconnectedError(
+                "failed to deliver command to robot"
+            ) from exc
 
         outcome = CommandOutcome(
             command["command_id"], "sent", received=False, accepted=False,

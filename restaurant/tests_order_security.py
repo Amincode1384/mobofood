@@ -16,7 +16,6 @@ from django.test import Client, TestCase
 
 from .models import Category, Food, Order
 from .order_security import TOKEN_HEADER
-from .qr_generator import generate_table_signature
 
 
 class OrderTrackingSecurityTests(TestCase):
@@ -49,7 +48,6 @@ class OrderTrackingSecurityTests(TestCase):
     def _create_order(self, client, table=1, seat="T1-top", key=None, name="مشتری"):
         payload = {
             "table": table,
-            "table_signature": generate_table_signature(table),
             "seats": [seat],
             "name": name,
             "foods": [{"id": self.food.id, "qty": 1}],
@@ -369,7 +367,7 @@ class OrderTrackingSecurityTests(TestCase):
         response = self._track(Client(), order_id, repaired_token)
         self.assertEqual(response.status_code, 200, response.content)
 
-    def test_create_order_requires_valid_table_signature_still(self):
+    def test_create_order_creates_order_with_manual_table(self):
         payload = {
             "table": 6,
             "seats": ["T6-top"],
@@ -382,8 +380,7 @@ class OrderTrackingSecurityTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["code"], "signature_required")
+        self.assertEqual(response.status_code, 200, response.content)
 
     # ------------------------------------------------------------------
     # سفارش‌های قدیمی

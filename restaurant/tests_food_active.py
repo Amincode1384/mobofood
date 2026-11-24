@@ -13,7 +13,6 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 
 from .models import Category, Food, Order, OrderItem
-from .qr_generator import generate_table_signature
 
 User = get_user_model()
 
@@ -56,7 +55,6 @@ class ActiveBase(TestCase):
         food = food or self.food
         return {
             "table": 3,
-            "table_signature": generate_table_signature(3),
             "seats": ["T3-top"],
             "foods": [{"id": food.id, "qty": qty}],
             "idempotency_key": uuid.uuid4().hex,

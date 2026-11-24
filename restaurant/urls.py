@@ -65,12 +65,6 @@ urlpatterns = [
     # Customer recognition API
     path("api/customer/check/", views.check_customer_phone, name="check_customer_phone"),
 
-    # Real seat occupancy (NEW)
+    # Real seat occupancy
     path("api/seats/status/", views.get_seats_status, name="get_seats_status"),
-
-    # QR Code URLs
-    path("qr/<int:table_number>/", views.qr_code_image, name="qr_code_image"),
-    path("qr/<int:table_number>/page/", views.qr_code_page, name="qr_code_page"),
-    path("qr/dashboard/", views.qr_codes_dashboard, name="qr_codes_dashboard"),
-    path("qr/generate-all/", views.generate_all_qr_codes_view, name="generate_all_qr_codes"),
 ]

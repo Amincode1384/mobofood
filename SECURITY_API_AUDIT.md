@@ -46,7 +46,6 @@
 | 15 | `/api/foods/<id>/update/` | POST | ویرایش غذا | ✅ | is_staff* | امن |
 | 16 | `/api/foods/<id>/delete/` | DELETE | حذف غذا | ✅ | is_staff | امن |
 | 17 | `/api/categories/create/` | POST | افزودن دسته | ✅ | is_staff | امن |
-| 18 | `/qr/generate-all/` | POST | تولید همzeit QRهای همه میزها | ✅ | is_staff | امن |
 
 \* `update_food` دکوراتور ندارد اما فقط خواندن/نوشتن internall است؛ هرگونه تغییر در آن در آینده باید `@_staff_api_required` گیرد (انظر بخش ۷).
 
@@ -58,7 +57,6 @@
 | 20 | `/api/orders/<id>/confirm/` | POST | تأیید تحویل مشتری | توکن پیگیری مشتری | امن |
 | 21 | `/api/customer/check/` | GET | پیدا کردن سفارش بر اساس تلفن | محدودیت نرخ (30/دقیقه به ازای IP) | امن — اصلاح شد |
 | 22 | `/api/seats/status/` | GET | صندلی‌های اشغالی (عمومی برای QR) | عمومی (فقط حالت اشغالی، بدون هویت) | امن — mục đích عمومی |
-| 23 | `/qr/<int:table_number>/` | GET | تصویر QR میز | عمومی | امن |
 
 ### ج) APIهای عمومی — ۸ endpoint (مục đích عمومی، بدون تغییر)
 
@@ -70,11 +68,8 @@
 | 27 | `/api/categories/` | GET | خواندن دسته‌ها | نمایش دسته‌ها به مشتری |
 | 28 | `/order/<int:id>/` | GET | صفحهٔ پیگیری HTML | توکن پیگیری در Session/Header |
 | 29 | `/api/foods/<id>/toggle-active/` ... | (در Tier A است) | | |
-| 30 | `/qr/<int:table_number>/page/` | GET | صفحهٔ QR میز | عمومی |
-| 31 | `/qr/dashboard/` | GET | داشبورد QR | `@user_passes_test(is_staff)` — managerial |
 | 32 | dashboard/، manage/menu/ | GET | صفحات管理 | `@user_passes_test(is_staff)` |
 
-*(क्रम बेट结尾: Pages dashboard/manage/menu/qr/dashboard نیز با @user_passes_test(is_staff) محافظت می‌شوند.)*
 
 ---
 

@@ -31,7 +31,7 @@ from restaurant.error_logs import SystemErrorLog  # noqa: F401
 # یکتایی در سطح دیتابیس نیز تضمین می‌شود.
 MISSION_CODE_PREFIX = "MSN"
 
-# محدودهٔ معتبر شمارهٔ میزها (باید با محدودهٔ QR Code و تولید QR هماهنگ باشد)
+# محدودهٔ معتبر شمارهٔ میزها (یکتای جدیدترین میز = آخرین شماره موجود + 1)
 MIN_TABLE_NUMBER = 1
 MAX_TABLE_NUMBER = 64
 

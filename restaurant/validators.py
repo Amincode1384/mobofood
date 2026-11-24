@@ -3,7 +3,7 @@
 
 این ماژول شامل اعتبارسنجی‌های server-side برای:
 1. شماره تلفن مشتری
-2. شماره میز و امضای امنیتی آن (QR Code)
+2. شماره میز انتخابی کاربر
 
 قالب‌های معتبر شماره تلفن:
 - 09123456789
@@ -14,7 +14,6 @@
 
 import re
 from django.core.exceptions import ValidationError
-from .qr_generator import verify_table_signature
 
 
 def validate_iranian_phone(phone):
@@ -109,40 +108,30 @@ def validate_optional_phone(phone):
     return validate_iranian_phone(phone)
 
 
-def validate_table_number(table_number, signature=None):
+def validate_table_number(table_number):
     """
-    اعتبارسنجی server-side شماره میز (حیاتی برای امنیت)
+    اعتبارسنجی server-side شماره میز
 
-    این تابع اعتبارسنجی‌های زیر را انجام می‌دهد:
-    1. بررسی نوع داده (باید عدد صحیح باشد)
-    2. بررسی محدوده معتبر (1-64)
-    3. بررسی امضای امنیتی QR Code (اگر ارائه شده باشد)
+    فقط شمارهٔ میز انتخابی کاربر (۱ تا ۶۴) اعتبار می‌شود؛
+    سیستم ورود و انتخاب میز با QR Code حذف شده و کاربر فقط
+    به صورت دستی میز خود را انتخاب می‌کند.
 
     Args:
         table_number: شماره میز (می‌تواند string یا int باشد)
-        signature (str, optional): امضای امنیتی QR Code
 
     Returns:
         int: شماره میز معتبر
 
     Raises:
-        ValidationError: در صورت نامعتبر بودن شماره میز یا امضا
-
-    Security Notes:
-        - این تابع MUST در تمام API endpoints ای که شماره میز دریافت می‌کنند
-          فراخوانی شود (به خصوص create_order)
-        - امضای QR Code را همیشه بررسی کنید تا از حملات replay جلوگیری شود
-        - لاگ تلاش‌های ناموفق برای شناسایی حملات
+        ValidationError: در صورت نامعتبر بودن شماره میز
     """
 
-    # ۱. بررسی نوع داده و تبدیل
     if table_number is None:
         raise ValidationError(
             "شماره میز مشخص نشده است.",
             code="table_required"
         )
 
-    # تبدیل به int (اگر string باشد)
     try:
         table_number = int(table_number)
     except (ValueError, TypeError):
@@ -151,7 +140,6 @@ def validate_table_number(table_number, signature=None):
             code="table_invalid_type"
         )
 
-    # ۲. بررسی محدوده معتبر (1-64)
     if not (1 <= table_number <= 64):
         raise ValidationError(
             f"شماره میز {table_number} خارج از محدوده مجاز است. "
@@ -159,51 +147,4 @@ def validate_table_number(table_number, signature=None):
             code="table_out_of_range"
         )
 
-    # ۳. بررسی امضای امنیتی (اگر ارائه شده باشد)
-    if signature is not None:
-        if not isinstance(signature, str) or not signature.strip():
-            raise ValidationError(
-                "امضای امنیتی نامعتبر است.",
-                code="signature_invalid"
-            )
-
-        if not verify_table_signature(table_number, signature):
-            # این یک تلاش برای دستکاری است - باید لاگ شود
-            raise ValidationError(
-                "امضای امنیتی QR Code نامعتبر است. "
-                "لطفاً QR Code روی میز خود را دوباره اسکن کنید.",
-                code="signature_mismatch"
-            )
-
     return table_number
-
-
-def validate_table_with_signature(table_number, signature):
-    """
-    اعتبارسنجی شماره میز همراه با الزام وجود امضای معتبر
-
-    این تابع سخت‌گیرانه‌تر از validate_table_number است
-    و حتماً امضای معتبر می‌خواهد.
-
-    Args:
-        table_number: شماره میز
-        signature (str): امضای امنیتی QR Code (الزامی)
-
-    Returns:
-        int: شماره میز معتبر
-
-    Raises:
-        ValidationError: در صورت نامعتبر بودن یا نبود امضا
-
-    Use Case:
-        برای endpoint هایی که حتماً باید از QR Code اسکن شده باشند
-        (مثل ثبت سفارش نهایی)
-    """
-
-    if signature is None or not signature.strip():
-        raise ValidationError(
-            "امضای امنیتی الزامی است. لطفاً QR Code روی میز را اسکن کنید.",
-            code="signature_required"
-        )
-
-    return validate_table_number(table_number, signature)

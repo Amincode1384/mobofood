@@ -29,15 +29,7 @@ from .models import (
 )
 from .events import broadcast_order_event, broadcast_order_removed
 from .error_logs import SystemErrorLog, LEVEL_CHOICES, SOURCE_CHOICES
-from .validators import validate_optional_phone, validate_table_with_signature
-from .qr_generator import (
-    verify_table_signature,
-    generate_table_signature,
-    generate_qr_code_image,
-    generate_all_qr_codes,
-    cache_table_access,
-    get_table_info
-)
+from .validators import validate_optional_phone, validate_table_number
 from . import order_statuses as order_status
 from . import mission_statuses as mission_status
 from .order_security import (
@@ -49,6 +41,19 @@ from .order_security import (
     rate_limited,
     request_carries_customer_token,
 )
+
+
+def mask_phone(phone):
+    """
+    ماشین حساب نمایش کوچک‌نمایی (PII masking): فقط ۴ رقم آخر شمارهٔ
+    تلفن در پاسخ‌های عمومی/داخلی بازگشت داده می‌شود.
+    """
+    value = (phone or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return "***"
+    return value[-4:]
 
 
 def serialize_order(order):
@@ -72,7 +77,7 @@ def serialize_order(order):
         "table": order.table,
         "seats": order.seats,
         "customer_name": order.customer_name,
-        "customer_phone": order.customer_phone,
+        "customer_phone": mask_phone(order.customer_phone),
         "status": order.status,
         "total": order.total,
         "items": items,
@@ -180,54 +185,13 @@ def _idempotent_replay_response(request, record, fingerprint):
 
 def customer(request):
     """
-    صفحه سفارش مشتری با پشتیبانی از QR Code
+    صفحهٔ سفارش مشتری.
 
-    پارامترهای URL:
-        ?table=X&sig=SIGNATURE
-
-    QR Code ها شامل امضای امنیتی هستند که از دستکاری جلوگیری می‌کند.
+    ورود دستی کاربر: انتخاب میز (۱ تا ۶۴) — بدون QR Code و بدون قفل.
     """
     context = {
-        'initial_table': None,
-        'table_locked': False,
         'error_message': None
     }
-
-    # خواندن شماره میز از URL
-    table_param = request.GET.get('table')
-    signature_param = request.GET.get('sig')
-
-    if table_param:
-        try:
-            table_number = int(table_param)
-
-            # بررسی محدوده معتبر
-            if not (1 <= table_number <= 64):
-                context['error_message'] = f'شماره میز {table_number} نامعتبر است. میز باید بین 1 تا 64 باشد.'
-                return render(request, "customer.html", context)
-
-            # بررسی امضای امنیتی
-            if signature_param:
-                if verify_table_signature(table_number, signature_param):
-                    # QR Code معتبر است
-                    context['initial_table'] = table_number
-                    context['table_locked'] = True
-                    context['table_signature'] = signature_param
-
-                    # کش کردن دسترسی به این میز (1 ساعت)
-                    cache_table_access(table_number, 3600)
-                else:
-                    # امضا نامعتبر است - احتمال دستکاری
-                    context['error_message'] = 'QR Code نامعتبر است. لطفاً QR Code میز خود را دوباره اسکن کنید.'
-            else:
-                # QR Code بدون امضا - به مشتری اجازه انتخاب دستی می‌دهیم
-                # اما هشدار می‌دهیم
-                context['initial_table'] = table_number
-                context['table_locked'] = False
-                context['error_message'] = 'لطفاً QR Code روی میز خود را اسکن کنید تا شماره میز قفل شود.'
-
-        except (ValueError, TypeError):
-            context['error_message'] = 'پارامتر شماره میز نامعتبر است.'
 
     return render(request, "customer.html", context)
 
@@ -341,7 +305,7 @@ def order_tracking(request, id):
     if order is None:
         return render(
             request,
-            "qr_error.html",
+            "error.html",
             {"error": "سفارش مورد نظر پیدا نشد."},
             status=404
         )
@@ -351,12 +315,11 @@ def order_tracking(request, id):
     if not authorized:
         return render(
             request,
-            "qr_error.html",
+            "error.html",
             {
                 "error": (
                     "دسترسی به این سفارش مجاز نیست. اگر مالک این سفارش هستید، "
-                    "آن را از صفحهٔ سفارش‌گیری (دکمهٔ پیگیری) باز کنید یا "
-                    "QR Code میز را دوباره اسکن کنید."
+                    "آن را از صفحهٔ سفارش‌گیری (دکمهٔ پیگیری) باز کنید."
                 )
             },
             status=403
@@ -1063,7 +1026,6 @@ def create_order(request):
         data = json.loads(request.body)
 
         table = data.get("table")
-        table_signature = data.get("table_signature")  # امضای امنیتی QR Code
         foods = data.get("foods", [])
 
         # نام فقط برای فاکتور — اختیاریه که فرانت‌اند بفرستدش
@@ -1078,8 +1040,7 @@ def create_order(request):
         # =========================================================
         # 🔁 Idempotency — هر عملیات منطقی یک کلید یکتا دارد
         # =========================================================
-        # این کلید جدا از table_signature است:
-        #   table_signature  → احراز اصالت میز
+        # این کلید جدا از fingerprint است:
         #   idempotency_key  → جلوگیری از اجرای دوبارهٔ همان عملیات
         idempotency_key = (data.get("idempotency_key") or "").strip()
 
@@ -1104,25 +1065,17 @@ def create_order(request):
             )
 
         # =========================================================
-        # 🔐 اعتبارسنجی SERVER-SIDE شماره میز (حیاتی برای امنیت)
-        # =========================================================
-        # این بخش از تلاش‌های زیر جلوگیری می‌کند:
-        # 1. ارسال شماره میز دلخواه از طریق Postman/curl
-        # 2. دستکاری شماره میز در DevTools
-        # 3. حملات replay با QR Code های قدیمی
-        # 4. استفاده از شماره میز خارج از محدوده (>64 یا <1)
+        # ✅ اعتبارسنجی SERVER-SIDE شماره میز
         # =========================================================
 
         try:
-            # اعتبارسنجی شماره میز + امضای QR Code
-            table = validate_table_with_signature(table, table_signature)
+            table = validate_table_number(table)
         except ValidationError as e:
-            # لاگ کردن تلاش ناموفق برای شناسایی حملات
             import logging
             logger = logging.getLogger(__name__)
             logger.warning(
                 f"Table validation failed: {e.message} "
-                f"[table={table}, signature={table_signature}, "
+                f"[table={table}, "
                 f"ip={request.META.get('REMOTE_ADDR')}]"
             )
 
@@ -1134,7 +1087,6 @@ def create_order(request):
                 },
                 status=400
             )
-
         # =========================================================
         # 🔁 Idempotency — بررسی تکرار پیش از بررسی اشغال صندلی
         # =========================================================
@@ -1417,7 +1369,7 @@ def create_order(request):
         return JsonResponse(
             {
                 "success": False,
-                "error": str(e)
+                "error": "خطای داخلی سرور"
             },
             status=500
         )
@@ -2583,173 +2535,3 @@ def resolve_order_issue(request, id):
         return JsonResponse({"success": False, "error": "عملیات نامعتبر."}, status=400)
 
     return JsonResponse({"success": True, "status": order.status})
-
-
-# =========================================================
-# QR Code Views
-# =========================================================
-
-def qr_code_image(request, table_number):
-    """
-    تولید تصویر QR Code برای یک میز خاص
-
-    استفاده:
-        /qr/<table_number>/
-        مثال: /qr/1/ برای میز شماره 1
-
-    خروجی:
-        تصویر PNG حاوی QR Code با امضای امنیتی
-    """
-    try:
-        table_number = int(table_number)
-
-        # بررسی محدوده معتبر
-        if not (1 <= table_number <= 64):
-            return HttpResponse(
-                f'شماره میز {table_number} نامعتبر است.',
-                status=400
-            )
-
-        # تولید تصویر QR Code
-        image_bytes = generate_qr_code_image(table_number)
-
-        # بازگشت تصویر
-        return HttpResponse(
-            image_bytes,
-            content_type='image/png'
-        )
-
-    except (ValueError, TypeError):
-        return HttpResponse(
-            'پارامتر شماره میز نامعتبر است.',
-            status=400
-        )
-    except Exception as e:
-        return HttpResponse(
-            f'خطا در تولید QR Code: {str(e)}',
-            status=500
-        )
-
-
-def qr_code_page(request, table_number):
-    """
-    صفحه نمایش QR Code برای چاپ
-
-    استفاده:
-        /qr/<table_number>/page/
-        مثال: /qr/1/page/ برای صفحه چاپ میز 1
-
-    خروجی:
-        صفحه HTML حاوی QR Code و اطلاعات میز
-    """
-    try:
-        table_number = int(table_number)
-
-        # بررسی محدوده معتبر
-        if not (1 <= table_number <= 64):
-            return render(
-                request,
-                "qr_error.html",
-                {
-                    'error': f'شماره میز {table_number} نامعتبر است.'
-                }
-            )
-
-        # دریافت اطلاعات میز
-        table_info = get_table_info(table_number)
-
-        context = {
-            'table_number': table_number,
-            'table_info': table_info,
-            'qr_url': f'/qr/{table_number}/',
-        }
-
-        return render(request, "qr_page.html", context)
-
-    except (ValueError, TypeError):
-        return render(
-            request,
-            "qr_error.html",
-            {
-                'error': 'پارامتر شماره میز نامعتبر است.'
-            }
-        )
-    except Exception as e:
-        return render(
-            request,
-            "qr_error.html",
-            {
-                'error': f'خطا: {str(e)}'
-            }
-        )
-
-
-@user_passes_test(lambda user: user.is_staff, login_url="/admin/login/")
-def qr_codes_dashboard(request):
-    """
-    داشبورد مدیریت QR Codeها
-
-    استفاده:
-        /qr/dashboard/
-
-    خروجی:
-        صفحه HTML حاوی لیست تمام میزها با لینک‌های QR Code
-    """
-    tables = []
-    for i in range(1, 65):
-        table_info = get_table_info(i)
-        tables.append({
-            'number': i,
-            'info': table_info,
-            'qr_url': f'/qr/{i}/',
-            'page_url': f'/qr/{i}/page/',
-        })
-
-    context = {
-        'tables': tables,
-    }
-
-    return render(request, "qr_dashboard.html", context)
-
-
-@_staff_api_required
-def generate_all_qr_codes_view(request):
-    """
-    تولید تمام QR Codeها به‌صورت یک‌جا (برای دانلود ZIP)
-
-    استفاده:
-        POST /qr/generate-all/
-
-    خروجی:
-        فایل ZIP حاوی تمام تصاویر QR Code
-    """
-    if request.method != "POST":
-        return JsonResponse(
-            {
-                "success": False,
-                "error": "POST only"
-            },
-            status=405
-        )
-
-    try:
-        # تولید فایل ZIP
-        zip_buffer = generate_all_qr_codes()
-
-        # بازگشت فایل ZIP
-        response = HttpResponse(
-            zip_buffer.getvalue(),
-            content_type='application/zip'
-        )
-        response['Content-Disposition'] = 'attachment; filename="qr_codes.zip"'
-
-        return response
-
-    except Exception as e:
-        return JsonResponse(
-            {
-                "success": False,
-                "error": str(e)
-            },
-            status=500
-        )

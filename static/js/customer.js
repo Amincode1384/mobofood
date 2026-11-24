@@ -45,10 +45,6 @@ let currentSearch = "";
 let selectedSeat = null;   // { tableIndex, chairIds: [...], tableLabel }
 let foodsLoaded = false;
 
-// QR Code: شماره میز از URL و وضعیت قفل
-let initialTableNumber = null;  // شماره میز از QR Code
-let isTableLocked = false;      // آیا میز قفل شده است؟
-let tableSignature = null;      // امضای امنیتی QR Code
 let isSubmittingOrder = false;  // جلوگیری از ارسال چندبارهٔ سفارش
 
 
@@ -65,71 +61,7 @@ function unlockBodyScroll() {
     _scrollLockCount = Math.max(0, _scrollLockCount - 1);
     if (_scrollLockCount === 0) document.body.style.overflow = "";
 }
-
-
-// ==========================
-// QR Code: خواندن پارامترهای URL
-// ==========================
-
-function getUrlParams() {
-    const params = new URLSearchParams(window.location.search);
-    return {
-        table: params.get('table'),
-        sig: params.get('sig')
-    };
-}
-
-function initQRCodeTable() {
-    const params = getUrlParams();
-
-    // اولویت با پارامترهای URL است (اسکن تازهٔ QR).
-    // اگر URL پارامتر نداشت (مثلاً بازگشت/رفرش بدون query)، ابتدا از
-    // مقادیر تزریق‌شده توسط Backend (context) و سپس از sessionStorage
-    // بازیابی می‌کنیم تا اطلاعات معتبر میز از بین نرود.
-    let tableParam = params.table;
-    let sigParam = params.sig;
-
-    if (!tableParam && window.__LUMEN_TABLE__ !== null && window.__LUMEN_TABLE__ !== undefined) {
-        tableParam = String(window.__LUMEN_TABLE__);
-        sigParam = window.__LUMEN_TABLE_SIGNATURE__ || null;
-    }
-
-    if (!tableParam) {
-        try {
-            const saved = JSON.parse(sessionStorage.getItem("tableAccess") || "null");
-            if (saved && saved.table) {
-                tableParam = String(saved.table);
-                sigParam = saved.sig || null;
-            }
-        } catch (e) { /* ignore */ }
-    }
-
-    if (tableParam) {
-        initialTableNumber = parseInt(tableParam);
-        tableSignature = sigParam || null;
-
-        // اگر امضا وجود داشت، میز قفل می‌شود
-        if (sigParam) {
-            isTableLocked = true;
-            console.log(`✅ QR Code معتبر: میز ${initialTableNumber} قفل شد`);
-            // نگهداری برای رفرش/بازگشت
-            try {
-                sessionStorage.setItem("tableAccess", JSON.stringify({ table: initialTableNumber, sig: tableSignature }));
-            } catch (e) { /* ignore */ }
-        } else {
-            console.warn(`⚠️ شماره میز ${initialTableNumber} بدون امضا - قفل نشد`);
-        }
-    }
-}
-
-
-// ==========================
-// Start
-// ==========================
-
 window.onload = function () {
-    // ابتدا پارامترهای QR Code را بررسی می‌کنیم
-    initQRCodeTable();
 
     initLoader();
     initAuthGate();
@@ -921,25 +853,9 @@ async function submitOrder() {
         return;
     }
 
-    // 🔐 اعتبارسنجی امنیتی میز در سمت Frontend (اعتبارسنجی نهایی در Backend است)
-    // سفارش فقط برای میزی که با QR Code معتبر قفل شده است امکان‌پذیر است.
-    if (!isTableLocked || initialTableNumber === null) {
-        showToast("برای ثبت سفارش باید QR Code روی میز خود را اسکن کنید.", true);
-        return;
-    }
-    if (selectedSeat.tableIndex !== initialTableNumber) {
-        showToast("⚠️ میز انتخاب‌شده با میز QR Code مطابقت ندارد. لطفاً دوباره تلاش کنید.", true);
-        return;
-    }
-    if (!tableSignature) {
-        showToast("امضای امنیتی میز موجود نیست. لطفاً QR Code را دوباره اسکن کنید.", true);
-        return;
-    }
-
     const currentUser = getCurrentUser();
     const order = {
         table: selectedSeat.tableIndex,
-        table_signature: tableSignature,
         seats: selectedSeat.chairIds,
         name: currentUser ? currentUser.name : undefined,
         phone: currentUser ? currentUser.phone : undefined,
@@ -1114,12 +1030,6 @@ function buildTableCards() {
 
 // کاربر میز را انتخاب کرد — به مرحله ۲ برو
 function handleTableClick(tableNumber) {
-    // اگر میز از QR قفل شده، فقط همان میز قابل انتخاب است
-    if (isTableLocked && initialTableNumber !== null && tableNumber !== initialTableNumber) {
-        showToast("⚠️ میز شما از QR قفل شده است. فقط می‌توانید میز " + initialTableNumber + " را انتخاب کنید.", "warning");
-        return;
-    }
-
     pendingTableNumber = tableNumber;
     pendingChairIds = [];
 
@@ -1154,14 +1064,6 @@ function updateTableCardStates() {
         const card = tableCardElements[table.number];
         if (!card) return;
 
-        // اگر QR قفل شده، فقط میز قفل‌شده نمایش داده می‌شود و بقیه-locked هستندـ
-        if (isTableLocked && initialTableNumber !== null && table.number !== initialTableNumber) {
-            card.classList.add("locked");
-            card.classList.remove("selected");
-            return;
-        }
-
-        // اگر میز دیگری التأیید نشده ولی هم‌ภาษا انتخاب نشده، غیرفعال نیست
         if (pendingTableNumber !== null && table.number !== pendingTableNumber) {
             card.classList.add("locked");
             card.classList.remove("selected");
@@ -1206,7 +1108,6 @@ function buildChairStage(tableNumber) {
         chairElements[chairKey] = el;
     });
 
-    // اگر QR قفل شده، کارت‌های دیگر غیرفعال کن
     updateTableCardStates();
 }
 
@@ -1231,14 +1132,6 @@ function handleChairClick(chairKey) {
     // صندلی مشغول است — انتخاب نمی‌شود
     if (occupiedChairs.has(chairKey)) {
         showToast("این صندلی مشغول است.", "warning");
-        return;
-    }
-
-    // میز قفل است و این صندلی متعلق به میز دیگر است
-    const parts = chairKey.split("-");
-    const chairTable = Number(parts[0]);
-    if (isTableLocked && initialTableNumber !== null && chairTable !== initialTableNumber) {
-        showToast("⚠️ میز شما قفل شده است. فقط صندلی‌های میز " + initialTableNumber + " را انتخاب کنید.", "warning");
         return;
     }
 
@@ -1366,31 +1259,6 @@ async function openSeatModal() {
 
     resetSeatSummary();
     updateTableCardStates();
-
-    // اگر میز از QR Code قفل شده، به‌طور خودکار کارت میز قفل‌شده را انتخاب می‌کنیم
-    if (isTableLocked && initialTableNumber !== null) {
-        showToast("✅ میز " + initialTableNumber + " از QR Code شما انتخاب شده است", "success");
-
-        pendingTableNumber = initialTableNumber;
-        // انتخاب کارت میز
-        tableCardElements[initialTableNumber].classList.add("selected");
-
-        // غیرفعال کردن کارت‌های دیگر
-        updateTableCardStates();
-
-        // حرکت به مرحله ۲
-        document.getElementById("seatPhaseTables").style.display = "none";
-        document.getElementById("seatPhaseChairs").style.display = "block";
-
-        document.getElementById("chairPhaseTableNum").textContent = initialTableNumber;
-        document.getElementById("chairTableLabel").textContent = "میز " + initialTableNumber;
-
-        buildChairStage(initialTableNumber);
-        updateChairState(initialTableNumber);
-        resetSeatSummary();
-        updateSeatSummary();
-    }
-}
 
 function closeSeatModal() {
     const overlay = document.getElementById("seatOverlay");

@@ -15,7 +15,6 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 
 from .models import Category, Food, Order, OrderItem
-from .qr_generator import generate_table_signature
 
 User = get_user_model()
 
@@ -65,7 +64,6 @@ class MgmtBase(TestCase):
         food = food or self.food
         return {
             "table": table,
-            "table_signature": generate_table_signature(table),
             "seats": [seat],
             "foods": [{"id": food.id, "qty": qty}],
             "idempotency_key": uuid.uuid4().hex,

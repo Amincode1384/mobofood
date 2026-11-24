@@ -15,7 +15,6 @@ from django.core.cache import cache
 from django.test import Client, TestCase
 from .models import Category, Food, Order
 from .order_security import TOKEN_HEADER
-from .qr_generator import generate_table_signature
 
 
 class KitchenSecurityBase(TestCase):
@@ -279,7 +278,6 @@ class TamperingTests(KitchenSecurityBase):
     def test_customer_tracking_token_is_not_a_kitchen_credential(self):
         payload = {
             "table": 9,
-            "table_signature": generate_table_signature(9),
             "seats": ["T9-top"],
             "foods": [{"id": self.food.id, "qty": 1}],
             "idempotency_key": uuid.uuid4().hex,
@@ -308,7 +306,6 @@ class TamperingTests(KitchenSecurityBase):
     def test_anonymous_with_tracking_token_cannot_change_status(self):
         payload = {
             "table": 9,
-            "table_signature": generate_table_signature(9),
             "seats": ["T9-top"],
             "foods": [{"id": self.food.id, "qty": 1}],
             "idempotency_key": uuid.uuid4().hex,
@@ -358,7 +355,6 @@ class CustomerFlowsStillWorkTests(KitchenSecurityBase):
     def _create_order(self):
         payload = {
             "table": 7,
-            "table_signature": generate_table_signature(7),
             "seats": ["T7-top"],
             "foods": [{"id": self.food.id, "qty": 2}],
             "idempotency_key": uuid.uuid4().hex,

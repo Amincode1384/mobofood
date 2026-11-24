@@ -97,6 +97,14 @@ DISPATCHABLE_STATUSES = {
     mission_status.STATUS_ASSIGNED,
 }
 
+# پیام‌های عمومی خطاهای مأموریت: هرگز جزئیات استثنا یا مقادیر داخلی را در
+# پاسخ API یا فیلد error_message دیتابیس بازنمی‌گردانیم (کد خطا در error_type).
+_MISSION_FAILURE_MESSAGES = {
+    "timeout": "زمان اجرای مأموریت از حد مجاز عبور کرد.",
+    "robot_communication_failed": "ارتباط با ربات قطع یا ناموفق بود.",
+    "robot_rejected": "ربات اجرای مأموریت را رد کرد.",
+}
+
 
 def resolve_robot_id(mission, requested_robot_id=None):
     """Choose the destination robot. Stored robot_id wins; input must match it."""
@@ -203,7 +211,10 @@ def dispatch_mission(*, mission_uid=None, mission_code=None, robot_id=None,
             Mission.objects.filter(pk=mission.pk).update(
                 status=mission_status.STATUS_FAILED,
                 error_type="timeout",
-                error_message=str(exc)[:500],
+                error_message=_MISSION_FAILURE_MESSAGES.get(
+                    "timeout",
+                    "زمان اجرای مأموریت از حد مجاز عبور کرد.",
+                ),
             )
         _record_transport_failure(exc, "robot_timeout", mission)
         raise DispatchError(
@@ -215,28 +226,43 @@ def dispatch_mission(*, mission_uid=None, mission_code=None, robot_id=None,
             Mission.objects.filter(pk=mission.pk).update(
                 status=mission_status.STATUS_FAILED,
                 error_type="robot_communication_failed",
-                error_message=str(exc)[:500],
+                error_message=_MISSION_FAILURE_MESSAGES.get(
+                    "robot_communication_failed",
+                    "خطای ربات در انجام مأموریت رخ داد.",
+                ),
             )
         _record_transport_failure(exc, "robot_disconnected", mission)
-        raise DispatchError(str(exc), code="robot_disconnected", http_status=503)
+        raise DispatchError(
+            "اتصال با ربات قطع بود.",
+            code="robot_disconnected", http_status=503,
+        )
     except RobotRejectedCommandError as exc:
         with transaction.atomic():
             Mission.objects.filter(pk=mission.pk).update(
                 status=mission_status.STATUS_FAILED,
                 error_type="robot_rejected",
-                error_message=str(exc)[:500],
+                error_message=_MISSION_FAILURE_MESSAGES.get("robot_rejected", ""),
             )
         _record_transport_failure(exc, "robot_rejected", mission)
-        raise DispatchError(str(exc), code="robot_rejected", http_status=409)
+        raise DispatchError(
+            "ربات فرمان را رد کرد.",
+            code="robot_rejected", http_status=409,
+        )
     except RobotTransportError as exc:
         with transaction.atomic():
             Mission.objects.filter(pk=mission.pk).update(
                 status=mission_status.STATUS_FAILED,
                 error_type="robot_communication_failed",
-                error_message=str(exc)[:500],
+                error_message=_MISSION_FAILURE_MESSAGES.get(
+                    "robot_communication_failed",
+                    "خطای ربات در انجام مأموریت رخ داد.",
+                ),
             )
         _record_transport_failure(exc, "transport_error", mission)
-        raise DispatchError(str(exc), code="transport_error", http_status=503)
+        raise DispatchError(
+            "ارسال فرمان به ربات ناموفق بود.",
+            code="transport_error", http_status=503,
+        )
 
     received = bool(outcome.received)
     accepted = bool(outcome.accepted)

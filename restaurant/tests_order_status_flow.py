@@ -18,7 +18,6 @@ from . import order_statuses as order_status
 from .models import Category, Food, Order
 from .order_security import TOKEN_HEADER
 from .order_statuses import STATUS_KEYS, STATUS_LABELS
-from .qr_generator import generate_table_signature
 
 
 class StatusDefinitionTests(TestCase):
@@ -85,7 +84,6 @@ class TrackingStatusDisplayTests(TestCase):
     def _create_order(self):
         payload = {
             "table": 2,
-            "table_signature": generate_table_signature(2),
             "seats": ["T2-top"],
             "foods": [{"id": self.food.id, "qty": 1}],
             "idempotency_key": uuid.uuid4().hex,
@@ -308,7 +306,6 @@ class StatusTransitionApiTests(TestCase):
     def _create_order(self):
         payload = {
             "table": 4,
-            "table_signature": generate_table_signature(4),
             "seats": ["T4-top"],
             "foods": [{"id": self.food.id, "qty": 1}],
             "idempotency_key": uuid.uuid4().hex,

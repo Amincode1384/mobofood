@@ -726,12 +726,6 @@ button{font-family:inherit;cursor:pointer;}
 <div class="toast" id="toast"><i class="bi bi-check-circle-fill" id="toastIcon"></i><span id="toastMsg"></span></div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script>
-  // انتقال اطلاعات میز/امضا از Backend به Frontend (برای حفظ وضعیت قفل میز)
-  window.__LUMEN_TABLE__ = {{ initial_table|default:"null" }};
-  window.__LUMEN_TABLE_LOCKED__ = {{ table_locked|yesno:"true,false" }};
-  window.__LUMEN_TABLE_SIGNATURE__ = {% if table_signature %}"{{ table_signature }}"{% else %}null{% endif %};
-</script>
 <script src="../static/js/customer.js?v=20261117"></script>
 </body>
 </html>

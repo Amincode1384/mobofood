@@ -5,7 +5,6 @@
 from django.test import TestCase, Client
 from django.urls import reverse
 from .models import Category, Food, Order
-from .qr_generator import generate_table_signature
 import json
 import uuid
 
@@ -64,7 +63,6 @@ class OrderCreationIntegrationTestCase(TestCase):
         """تست ثبت سفارش با شماره تماس معتبر"""
         order_data = {
             "table": 3,
-            "table_signature": generate_table_signature(3),
             "seats": ["T3-1", "T3-2"],
             "name": "علی احمدی",
             "phone": "0912 345 6789",
@@ -95,7 +93,6 @@ class OrderCreationIntegrationTestCase(TestCase):
         """تست ثبت سفارش با شماره بین‌المللی"""
         order_data = {
             "table": 5,
-            "table_signature": generate_table_signature(5),
             "seats": ["T5-1"],
             "name": "محمد رضایی",
             "phone": "+989123456789",
@@ -122,7 +119,6 @@ class OrderCreationIntegrationTestCase(TestCase):
         """تست ثبت سفارش بدون شماره تماس (اختیاری)"""
         order_data = {
             "table": 2,
-            "table_signature": generate_table_signature(2),
             "seats": ["T2-1"],
             "name": "مهدی حسینی",
             "phone": "",
@@ -149,7 +145,6 @@ class OrderCreationIntegrationTestCase(TestCase):
         """تست رد سفارش با شماره نامعتبر"""
         order_data = {
             "table": 1,
-            "table_signature": generate_table_signature(1),
             "seats": ["T1-1"],
             "name": "رضا کریمی",
             "phone": "invalid_phone",
@@ -176,7 +171,6 @@ class OrderCreationIntegrationTestCase(TestCase):
         """تست رد سفارش با شماره کوتاه"""
         order_data = {
             "table": 4,
-            "table_signature": generate_table_signature(4),
             "seats": ["T4-1"],
             "name": "سارا محمدی",
             "phone": "091234567",  # کوتاه‌تر از 11 رقم
@@ -202,7 +196,6 @@ class OrderCreationIntegrationTestCase(TestCase):
         """تست رد سفارش با حروف در شماره"""
         order_data = {
             "table": 6,
-            "table_signature": generate_table_signature(6),
             "seats": ["T6-1"],
             "name": "فاطمه زارعی",
             "phone": "0912abc6789",
@@ -230,7 +223,6 @@ class OrderCreationIntegrationTestCase(TestCase):
 
         order_data = {
             "table": 7,
-            "table_signature": generate_table_signature(7),
             "seats": ["T7-1"],
             "name": "امیر حسنی",
             "phone": "invalid",
@@ -265,7 +257,6 @@ class OrderCreationIntegrationTestCase(TestCase):
         for idx, phone in enumerate(valid_phones):
             order_data = {
                 "table": idx + 1,
-            "table_signature": generate_table_signature(idx + 1),
                 "seats": [f"T{idx}-1"],
                 "name": f"مشتری {idx}",
                 "phone": phone,

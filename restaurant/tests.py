@@ -6,10 +6,9 @@ import threading
 import uuid
 
 from .models import Category, Food, Order, OrderIdempotencyKey
-from .qr_generator import generate_table_signature
 
 
-class CreateOrderTableSignatureTests(TestCase):
+class CreateOrderTableTests(TestCase):
     def setUp(self):
         self.client = Client(enforce_csrf_checks=False)
         cat = Category.objects.create(name="غذای تست", icon="🍽")
@@ -17,20 +16,18 @@ class CreateOrderTableSignatureTests(TestCase):
             category=cat, name="کباب", price=100000, stock=10
         )
 
-    def _payload(self, table, sig, seats=None):
+    def _payload(self, table, seats=None):
         return {
             "table": table,
-            "table_signature": sig,
             "foods": [{"id": self.food.id, "qty": 1}],
             "seats": seats or ["T05-top"],
             "idempotency_key": uuid.uuid4().hex,
         }
 
-    def test_valid_signature_creates_order(self):
-        sig = generate_table_signature(5)
+    def test_valid_table_creates_order(self):
         res = self.client.post(
             "/api/create_order/",
-            data=self._payload(5, sig),
+            data=self._payload(5),
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 200, res.content)
@@ -38,50 +35,34 @@ class CreateOrderTableSignatureTests(TestCase):
         self.assertTrue(body.get("success"))
         self.assertIn("order_id", body)
 
-    def test_missing_signature_rejected(self):
+    def test_missing_table_rejected(self):
         res = self.client.post(
             "/api/create_order/",
-            data=self._payload(5, None),
+            data=self._payload(None),
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 400)
         body = res.json()
         self.assertFalse(body.get("success"))
-        self.assertEqual(body.get("code"), "signature_required")
-
-    def test_invalid_signature_rejected(self):
-        res = self.client.post(
-            "/api/create_order/",
-            data=self._payload(5, "0000000000000000"),
-            content_type="application/json",
-        )
-        self.assertEqual(res.status_code, 400)
-        body = res.json()
-        self.assertFalse(body.get("success"))
-        self.assertIn(body.get("code"), ("signature_mismatch", "signature_invalid"))
-
-    def test_table_mismatch_with_signature_rejected(self):
-        # امضای میز 5 ولی شماره میز 4 → باید رد شود
-        sig = generate_table_signature(5)
-        res = self.client.post(
-            "/api/create_order/",
-            data=self._payload(4, sig, seats=["T04-top"]),
-            content_type="application/json",
-        )
-        self.assertEqual(res.status_code, 400)
-        body = res.json()
-        self.assertFalse(body.get("success"))
+        self.assertEqual(body.get("code"), "table_required")
 
     def test_out_of_range_table_rejected(self):
-        sig = generate_table_signature(5)
         res = self.client.post(
             "/api/create_order/",
-            data=self._payload(99, sig, seats=["T99-top"]),
+            data=self._payload(99),
             content_type="application/json",
         )
         self.assertEqual(res.status_code, 400)
         self.assertFalse(res.json().get("success"))
 
+    def test_invalid_table_type_rejected(self):
+        res = self.client.post(
+            "/api/create_order/",
+            data=self._payload("abc"),
+            content_type="application/json",
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json().get("code"), "table_invalid_type")
 
 class OrderResponseContractTests(TestCase):
     """قرارداد پاسخ ثبت سفارش: شناسهٔ واقعی و جلوگیری از سفارش تکراری."""
@@ -96,7 +77,6 @@ class OrderResponseContractTests(TestCase):
     def _payload(self, table=6, seats=None):
         return {
             "table": table,
-            "table_signature": generate_table_signature(table),
             "foods": [{"id": self.food.id, "qty": 1}],
             "seats": seats or ["T06-top"],
             "idempotency_key": uuid.uuid4().hex,
@@ -135,8 +115,7 @@ class OrderResponseContractTests(TestCase):
         self.assertEqual(Order.objects.filter(seats="T06-top").count(), 1)
 
     def test_error_response_never_reports_success(self):
-        payload = self._payload()
-        payload["table_signature"] = "0000000000000000"
+        payload = self._payload(table=0)  # outside 1..64 -> real validation error
         res = self.client.post(
             "/api/create_order/", data=payload, content_type="application/json"
         )
@@ -159,7 +138,6 @@ class OrderIdempotencyTests(TestCase):
     def _payload(self, key, seats=None, qty=1, table=7):
         return {
             "table": table,
-            "table_signature": generate_table_signature(table),
             "foods": [{"id": self.food.id, "qty": qty}],
             "seats": seats or ["T07-top"],
             "idempotency_key": key,
@@ -283,7 +261,6 @@ class OrderIdempotencyConcurrencyTests(TransactionTestCase):
             client = Client(enforce_csrf_checks=False)
             payload = {
                 "table": 8,
-                "table_signature": generate_table_signature(8),
                 "foods": [{"id": self.food.id, "qty": 1}],
                 "seats": [seat],
                 "idempotency_key": key,

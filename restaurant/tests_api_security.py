@@ -13,6 +13,7 @@
 
 import json
 import uuid
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.core.cache import cache
@@ -20,7 +21,6 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from .models import Category, Food, Order
-from .qr_generator import generate_table_signature
 
 
 class ApiSecurityBase(TestCase):
@@ -50,7 +50,6 @@ class ApiSecurityBase(TestCase):
     def _payload(self, table=7):
         return {
             "table": table,
-            "table_signature": generate_table_signature(table),
             "seats": [f"T{table}-top"],
             "foods": [{"id": self.food.id, "qty": 1}],
             "idempotency_key": uuid.uuid4().hex,
@@ -97,12 +96,6 @@ class AnonymousManagementApiTests(ApiSecurityBase):
             "/api/categories/create/",
             data=json.dumps({"name": "دسته امنیتی", "icon": "🍕"}),
             content_type="application/json",
-        )
-        self.assertEqual(response.status_code, 403)
-
-    def test_anonymous_cannot_generate_all_qr_codes(self):
-        response = Client().post(
-            "/qr/generate-all/", data=json.dumps({}), content_type="application/json"
         )
         self.assertEqual(response.status_code, 403)
 
@@ -230,24 +223,14 @@ class PublicApiStillWorksTests(ApiSecurityBase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["success"])
 
-    def test_create_order_rejects_bad_signature(self):
-        payload = self._payload()
-        payload["table_signature"] = "bad-signature"
+    def test_create_order_rejects_out_of_range_table(self):
         response = Client().post(
             "/api/create_order/",
-            data=json.dumps(payload),
+            data=json.dumps(self._payload(table=99)),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_qr_code_image_is_public(self):
-        response = Client().get("/qr/1/")
-        self.assertIn(response.status_code, (200, 404))  # 404 if image not generated
-
-
-# ---------------------------------------------------------------
-# ۵. Customer token protects own orders
-# ---------------------------------------------------------------
 class CustomerTokenOrderTests(ApiSecurityBase):
     """فقط مالک سفارش (با توکن همان سفارش) می‌تواند پیگیری/تأیید کند."""
 
@@ -299,3 +282,28 @@ class CheckCustomerPhoneRateLimitTests(ApiSecurityBase):
                 "/api/customer/check/?phone=09120000001"
             )
         self.assertEqual(response.status_code, 429)
+
+
+# ---------------------------------------------------------------
+# ۷. خطای داخلی سرور: بدون افشای جزئیات
+# ---------------------------------------------------------------
+class InternalErrorResponseTests(ApiSecurityBase):
+    """پاسخ خطای داخلی سرور نباید استثنا یا مقادیر حساس را در خود داشته باشد."""
+
+    def test_internal_error_response_is_generic(self):
+        marker = "boom-internal-leak-marker-xyz"
+
+        with mock.patch(
+            "restaurant.views.broadcast_order_event",
+            side_effect=Exception(marker),
+        ):
+            response = Client().post(
+                "/api/create_order/",
+                data=json.dumps(self._payload()),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 500)
+        body = response.json()
+        self.assertNotIn(marker, json.dumps(body))
+        self.assertEqual(body.get("error"), "خطای داخلی سرور")
