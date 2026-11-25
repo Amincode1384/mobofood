@@ -25,15 +25,18 @@ from restaurant.mission_statuses import (
 # معرفی می‌شود تا Django آن را به‌عنوان مدل اپ restaurant بشناسد و
 # migration برایش بسازد.
 from restaurant.error_logs import SystemErrorLog  # noqa: F401
+from restaurant.table_config import (
+    FIRST_TABLE_NUMBER as MIN_TABLE_NUMBER,
+    get_max_table_number,
+)
 
 
 # پیش‌فرض شناسهٔ مأموریت: MSN-XXXXXX (شش رقم ترتیبی)
 # یکتایی در سطح دیتابیس نیز تضمین می‌شود.
 MISSION_CODE_PREFIX = "MSN"
 
-# محدودهٔ معتبر شمارهٔ میزها (یکتای جدیدترین میز = آخرین شماره موجود + 1)
-MIN_TABLE_NUMBER = 1
-MAX_TABLE_NUMBER = 64
+# محدودهٔ معتبر شمارهٔ میزها، خواندهشده از FLOOR_TOTAL_TABLES
+MAX_TABLE_NUMBER = get_max_table_number()
 
 
 def _next_mission_code():
@@ -313,10 +316,11 @@ class Mission(models.Model):
                     "destination_table":
                         f"شمارهٔ میز باید یک عدد صحیح باشد، نه «{self.destination_table!r}»."
                 })
-            if not (MIN_TABLE_NUMBER <= table_num <= MAX_TABLE_NUMBER):
+            max_table = get_max_table_number()
+            if not (MIN_TABLE_NUMBER <= table_num <= max_table):
                 raise ValidationError({
                     "destination_table":
-                        f"شمارهٔ میز باید بین {MIN_TABLE_NUMBER} و {MAX_TABLE_NUMBER} باشد، نه «{self.destination_table!r}»."
+                        f"شمارهٔ میز باید بین {MIN_TABLE_NUMBER} و {max_table} باشد، نه «{self.destination_table!r}»."
                 })
 
     def save(self, *args, **kwargs):

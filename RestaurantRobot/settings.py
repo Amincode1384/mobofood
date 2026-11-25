@@ -47,6 +47,11 @@ ROBOT_TRANSPORT_BACKEND = os.environ.get('ROBOT_TRANSPORT_BACKEND', 'memory')
 ROBOT_API_TOKEN = os.environ.get('ROBOT_API_TOKEN', '')
 ROBOT_ACK_TIMEOUT_SECONDS = int(os.environ.get('ROBOT_ACK_TIMEOUT_SECONDS', '5'))
 
+# تعداد کل میزهای سالن: تنها منبع حقیقت برای شماره میزهای ۱ تا ۶۴
+# (TABLE_01 .. TABLE_64). اعتبارسنجی، دیسپچ مأموریت، ربات و رابط کاربری
+# همگی باید از این مقدار بخوانند و آن را هاردکد نکنند.
+FLOOR_TOTAL_TABLES = 64
+
 # Channel layer backend. In-memory keeps zero-config local dev/tests working;
 # Redis is required as soon as more than one process (Daphne + timer watcher,
 # or multiple Daphne workers) needs to share groups. Use CHANNEL_LAYER_BACKEND=redis

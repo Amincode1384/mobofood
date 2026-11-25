@@ -148,7 +148,7 @@ APIproduct منتظر اتمام حرکت فیزیکی نمیماند.
 - مقدار Timeout: `ROBOT_ACK_TIMEOUT_SECONDS` (پیشفرض ۵ ثانیه).
 - هنگام Timeout مأموریت به `FAILED` با `error_type=timeout` میرود، ولی **ارسال مجدد خودکار نمیشود** چون نمیتوان فرض کرد ربات فرمان را دریافت نکرده است.
 -Idempotency: هر مأموریت حداکثر یکبار ارسال میشود (`InMemoryOutcomeStore`کلیدشده با `mission_uid`). درخواست مجدد همان نتیجهٔ قبلی را برمیگرداند (`idempotent_replay=true`).
-- پاسخ تکراری (duplicate response) در Consumer ربات شناسایی و رد میشود.
+- پاسخ تکراری (duplicate response) در Consumer ربات شناسایی و رد میشود. یک فرمان میتواند چندین گزارش برای همان `command_id` داشته باشد، ولی فقط گزارشی که مرحله را جلو ببرد معتبر است: `sent → accepted → in_progress → completed`. تکرار همان مرحله یا هر گزارش پس از وضعیت نهایی (`completed`/`rejected`/...) با `duplicate_response` رد میشود.
 
 ---
 
@@ -205,6 +205,16 @@ python manage.py test restaurant.tests_mission_dispatch -v 2
 
 نتیجه: **۲۰ تست، هم PASS**.
 
+تست E2E چرخهٔ کامل (`--auto`) بدون سختافزار:
+
+```bash
+python manage.py test restaurant.tests_mission_e2e_smoke -v 2
+# یا دود-تست زنده روی سرور محلی Daphne + کلاینت مرجع:
+python scripts/e2e_live_smoke.py
+```
+
+هر دو مسیر چرخهٔ `dispatch → WebSocket command → ack → in_progress → completed` را تا وضعیت نهایی `COMPLETED` طی میکنند. اجرای کامل: **۴۲۹ تست، هم PASS**.
+
 ---
 
 ## ۱۴. سازگاری و اقدامات باقیمانده
@@ -216,5 +226,7 @@ python manage.py test restaurant.tests_mission_dispatch -v 2
   3. پیادهسازی سمت فریمور (توسط تیم Embedded) برای اتصال به `ws/robots/<id>/` و ارسال ack.
   4. اتصال الگوریتم مسیریابی/کنترل موتور (خارج از محدودهٔ این مأموریت).
   5. تست End-to-End با ربات واقعی و سناریوهای اضطراری.
+
+دود-تست E2E بدون سختافزار از پیش موجود و PASS است: `scripts/e2e_live_smoke.py` سرور Daphne محلی را با بکاند `memory` بالا میآورد، کلاینت مرجع `scripts/robot_client_reference.py --auto` را وصل میکند، فرمان را از `/api/missions/dispatch/` ارسال میکند و وضعیت نهایی مأموریت را `COMPLETED` تأیید میکند. برای ربات واقعی فقط مراحل ۱–۴ بالا باقی است.
 
 جزئیات استقرار (تنظیمات محیطی، Daphne، Redis، بکاپ و چک لیست اتصال) در `DEPLOYMENT.md` است.

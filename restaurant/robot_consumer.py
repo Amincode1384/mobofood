@@ -26,6 +26,24 @@ from .error_logs import record_system_error
 from .models import Mission
 
 
+# Progress of a single movement command, as reported by the robot. A robot may
+# send several reports for the *same* command_id (accepted -> in_progress ->
+# completed); only a report that moves the command forward is a fresh one. A
+# repeat of the same stage, or a report after a terminal stage, is a duplicate.
+_REPORT_RANK = {
+    "sent": 0,
+    "accepted": 1, "received": 1,
+    "in_progress": 2, "moving": 2, "started": 2,
+    "completed": 3, "delivered": 3, "done": 3,
+    "rejected": 3, "failed": 3, "error": 3,
+    "timeout": 3, "disconnected": 3,
+}
+_TERMINAL_REPORTS = frozenset({
+    "completed", "delivered", "done", "rejected", "failed", "error",
+    "timeout", "disconnected",
+})
+
+
 class RobotConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.robot_id = self.scope["url_route"]["kwargs"]["robot_id"]
@@ -144,9 +162,16 @@ class RobotConsumer(AsyncJsonWebsocketConsumer):
                     mission_uid=mission_uid,
                 )
                 return
-            # «sent» = فرمان فرستاده شده اما هنوز تأییدنشده ⇒ تأییدِ اولیهٔ ربات برای همین فرمان است؛ ادامه بده.
-            # هر وضعیت نهایی (accepted/rejected/completed/failed/timeout/disconnected) ⇒ پاسخ تکراری است.
-            if previous.status != "sent":
+            # «sent» = فرمان فرستاده شده اما هنوز تأییدنشده ⇒ تأییدِ اولیهٔ ربات.
+            # گزارش بعدی برای همان command_id فقط زمانی معتبر است که مرحلهٔ
+            # فرمان را جلو ببرد (accepted → in_progress → completed). تکرار
+            # همان مرحله یا گزارش پس از وضعیت نهایی، پاسخ تکراری است.
+            prev_status = str(previous.status or "sent").lower()
+            new_status = str(status or "").lower()
+            prev_rank = _REPORT_RANK.get(prev_status, 0)
+            new_rank = _REPORT_RANK.get(new_status)
+            is_progress = new_rank is not None and new_rank > prev_rank
+            if prev_status in _TERMINAL_REPORTS or not is_progress:
                 await self._reject(
                     "duplicate_response",
                     "پاسخ تکراری برای همین مأموریت.",

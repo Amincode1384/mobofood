@@ -34,8 +34,13 @@
 
 from django.core.exceptions import ValidationError
 
-MIN_TABLE_NUMBER = 1
-MAX_TABLE_NUMBER = 64
+from .table_config import (
+    FIRST_TABLE_NUMBER as MIN_TABLE_NUMBER,
+    get_max_table_number,
+)
+
+# نام‌های قدیمی برای سازگاری حفظ شدهاند، ولی مقدارشان از FLOOR_TOTAL_TABLES میآید.
+MAX_TABLE_NUMBER = get_max_table_number()
 
 
 # ---------------------------------------------------------
@@ -188,7 +193,7 @@ def _validate_destination_table(value):
     """اعتبارسنجی شمارهٔ میز مقصد مأموریت.
 
     - باید یک عدد صحیح باشد.
-    - باید در محدودهٔ معتبر میزها (MIN_TABLE_NUMBER..MAX_TABLE_NUMBER) قرار بگیرد.
+    - باید در محدودهٔ معتبر میزها (۱ .. FLOOR_TOTAL_TABLES) قرار بگیرد.
     """
     if value is None:
         return
@@ -198,9 +203,10 @@ def _validate_destination_table(value):
         raise ValidationError(
             f"شمارهٔ میز مقصد باید یک عدد صحیح باشد، نه «{value!r}»."
         )
-    if not (MIN_TABLE_NUMBER <= table_num <= MAX_TABLE_NUMBER):
+    max_table = get_max_table_number()
+    if not (MIN_TABLE_NUMBER <= table_num <= max_table):
         raise ValidationError(
-            f"شمارهٔ میز مقصد باید بین {MIN_TABLE_NUMBER} و {MAX_TABLE_NUMBER} باشد، نه «{value!r}»."
+            f"شمارهٔ میز مقصد باید بین {MIN_TABLE_NUMBER} و {max_table} باشد، نه «{value!r}»."
         )
 
 

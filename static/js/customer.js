@@ -966,13 +966,15 @@ async function submitOrder() {
 
 const SEATS_STATUS_URL = "/api/seats/status/";
 
-// ۴ میز — هر میز ۴ صندلی دارد: بالا، راست، پایین، چپ
-const TABLES = [
-    { number: 1 },
-    { number: 2 },
-    { number: 3 },
-    { number: 4 }
-];
+// لیست میزها از منبع واحد FLOOR_TOTAL_TABLES در تنظیمات بکاند میآید
+// (قالب آن را با json_script تزریق میکند). هیچ هاردکدی در صفحه وجود ندارد.
+const TABLE_NUMBER_DATA = document.getElementById("floor-table-numbers");
+const TABLE_NUMBERS = TABLE_NUMBER_DATA
+    ? JSON.parse(TABLE_NUMBER_DATA.textContent)
+    : [];
+const TABLES = TABLE_NUMBERS.map(function (number) {
+    return { number: number };
+});
 
 // ۴ جهت برای صندلی هر میز
 const CHAIR_DIRECTIONS = ["top", "right", "bottom", "left"];

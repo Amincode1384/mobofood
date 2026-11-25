@@ -17,19 +17,24 @@
         "parameters": { ... }
     }
 
-نگاشت مقصد: destination_table (عدد ۱..۶۴) → TABLE_01 .. TABLE_64.
+نگاشت مقصد: destination_table (عدد ۱ .. FLOOR_TOTAL_TABLES) → TABLE_01 .. TABLE_<N>.
 """
 
 from datetime import datetime, timezone as dt_timezone
 import uuid
+
+from .table_config import (
+    FIRST_TABLE_NUMBER as MIN_TABLE_NUMBER,
+    get_max_table_number,
+)
 
 PROTOCOL_VERSION = "1.0"
 COMMAND_TYPE_MOVE_TO_TABLE = "MOVE_TO_TABLE"
 SUPPORTED_PROTOCOL_VERSIONS = frozenset({PROTOCOL_VERSION})
 
 TABLE_PREFIX = "TABLE_"
-MIN_TABLE_NUMBER = 1
-MAX_TABLE_NUMBER = 64
+# نام قدیمی برای سازگاری؛ مقدار آن از FLOOR_TOTAL_TABLES خوانده میشود.
+MAX_TABLE_NUMBER = get_max_table_number()
 
 
 class InvalidDestinationError(ValueError):
@@ -45,7 +50,7 @@ class CommandValidationError(ValueError):
 
 
 def normalize_table_number(value):
-    """تبدیل شمارهٔ میز به عدد صحیح معتبر (۱..۶۴) یا خطا."""
+    """تبدیل شمارهٔ میز به عدد صحیح معتبر (۱ .. FLOOR_TOTAL_TABLES) یا خطا."""
     if value is None:
         raise InvalidDestinationError("شمارهٔ میز مقصد وجود ندارد.")
     try:
@@ -54,9 +59,10 @@ def normalize_table_number(value):
         raise InvalidDestinationError(
             f"شمارهٔ میز مقصد باید عدد صحیح باشد، نه {value!r}."
         )
-    if not (MIN_TABLE_NUMBER <= table_num <= MAX_TABLE_NUMBER):
+    max_table = get_max_table_number()
+    if not (MIN_TABLE_NUMBER <= table_num <= max_table):
         raise InvalidDestinationError(
-            f"شمارهٔ میز مقصد باید بین {MIN_TABLE_NUMBER} و {MAX_TABLE_NUMBER} "
+            f"شمارهٔ میز مقصد باید بین {MIN_TABLE_NUMBER} و {max_table} "
             f"باشد، نه {value!r}."
         )
     return table_num

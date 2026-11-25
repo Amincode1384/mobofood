@@ -30,6 +30,7 @@ from .models import (
 from .events import broadcast_order_event, broadcast_order_removed
 from .error_logs import SystemErrorLog, LEVEL_CHOICES, SOURCE_CHOICES
 from .validators import validate_optional_phone, validate_table_number
+from .table_config import get_table_numbers, get_floor_total_tables
 from . import order_statuses as order_status
 from . import mission_statuses as mission_status
 from .order_security import (
@@ -187,10 +188,12 @@ def customer(request):
     """
     صفحهٔ سفارش مشتری.
 
-    ورود دستی کاربر: انتخاب میز (۱ تا ۶۴) — بدون QR Code و بدون قفل.
+    ورود دستی کاربر: انتخاب میز (۱ تا FLOOR_TOTAL_TABLES) — بدون QR Code و بدون قفل.
     """
     context = {
-        'error_message': None
+        'error_message': None,
+        'table_numbers': get_table_numbers(),
+        'floor_total_tables': get_floor_total_tables(),
     }
 
     return render(request, "customer.html", context)

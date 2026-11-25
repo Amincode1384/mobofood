@@ -15,6 +15,8 @@
 import re
 from django.core.exceptions import ValidationError
 
+from .table_config import FIRST_TABLE_NUMBER, get_max_table_number
+
 
 def validate_iranian_phone(phone):
     """
@@ -112,7 +114,7 @@ def validate_table_number(table_number):
     """
     اعتبارسنجی server-side شماره میز
 
-    فقط شمارهٔ میز انتخابی کاربر (۱ تا ۶۴) اعتبار می‌شود؛
+    شمارهٔ میز انتخابی کاربر باید بین ۱ و FLOOR_TOTAL_TABLES باشد؛
     سیستم ورود و انتخاب میز با QR Code حذف شده و کاربر فقط
     به صورت دستی میز خود را انتخاب می‌کند.
 
@@ -140,10 +142,11 @@ def validate_table_number(table_number):
             code="table_invalid_type"
         )
 
-    if not (1 <= table_number <= 64):
+    max_table = get_max_table_number()
+    if not (FIRST_TABLE_NUMBER <= table_number <= max_table):
         raise ValidationError(
             f"شماره میز {table_number} خارج از محدوده مجاز است. "
-            f"میز باید بین 1 تا 64 باشد.",
+            f"میز باید بین {FIRST_TABLE_NUMBER} تا {max_table} باشد.",
             code="table_out_of_range"
         )
 

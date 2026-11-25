@@ -336,6 +336,43 @@ class RobotAckValidationTests(TestCase):
         self.assertEqual(consumer.sent[0]["event"], "error")
         self.assertEqual(consumer.sent[0]["code"], "duplicate_response")
 
+    def test_progress_reports_for_same_command_are_not_duplicates(self):
+        """Same command_id may report accepted -> in_progress -> completed."""
+        set_robot_transport(ChannelRobotTransport())
+        self.addCleanup(set_robot_transport, None)
+        mission = make_mission()
+        result = dispatch_mission(mission_uid=mission.mission_uid)
+        command_id = result["command_id"]
+
+        consumer = self._consumer()
+        consumer._get_mission = AsyncMock(return_value=mission)
+        consumer._update_mission = AsyncMock()
+
+        async def run():
+            for status in ("accepted", "in_progress", "completed"):
+                await consumer._handle_ack(
+                    command_id, status,
+                    {"event": "status", "mission_id": str(mission.mission_uid)},
+                )
+
+        async_to_sync(run)()
+        acks = [m for m in consumer.sent if m.get("event") == "ack_received"]
+        self.assertEqual(
+            [m["status"] for m in acks],
+            ["accepted", "in_progress", "completed"],
+        )
+        self.assertFalse([m for m in consumer.sent if m.get("event") == "error"])
+
+        # A repeated final report is still rejected as a duplicate.
+        async def repeat():
+            await consumer._handle_ack(
+                command_id, "completed",
+                {"event": "completed", "mission_id": str(mission.mission_uid)},
+            )
+
+        async_to_sync(repeat)()
+        self.assertEqual(consumer.sent[-1]["code"], "duplicate_response")
+
 
 class MovementCommandEdgeCaseTests(TestCase):
 
