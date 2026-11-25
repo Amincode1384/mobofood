@@ -10,9 +10,9 @@
 
 | متغیر | مقدار production | دلیل |
 |---|---|---|
-| `DJANGO_SECRET_KEY` | کلید تصادفی بلند | بدون آن با `DEBUG=0` برنامه بالا نمیآید (fail-fast) |
-| `DEBUG` | `0` | جلوگیری از صفحات خطا و کلید توسعه |
-| `ALLOWED_HOSTS` | لیست صریح | `"*"` با `DEBUG=0` رد میشود |
+| `DJANGO_SECRET_KEY` (یا `SECRET_KEY`) | کلید تصادفی بلند | بدون آن با `DJANGO_DEBUG=0` صریح programa بالا نمیآید (fail-fast)؛ هیچ مقدار پیشفرض هاردکدشده وجود ندارد |
+| `DJANGO_DEBUG` (یا `DEBUG`) | `0` | پیشفرز `0` است (fail-secure)؛ فقط در توسعه محلی `1` تنظیم شود |
+| `DJANGO_ALLOWED_HOSTS` (یا `ALLOWED_HOSTS`) | لیست صریح | `"*"` با `DEBUG=0` رد میشود؛ پیشفرض `localhost,127.0.0.1` |
 | `CHANNEL_LAYER_BACKEND` | `redis` | گروههای WebSocket بین Daphne و watcher مشترک شوند |
 | `REDIS_URL` | `redis://<host>:6379/0` | آدرس Redis |
 | `ROBOT_TRANSPORT_BACKEND` | `channels` | ارسال فرمان از طریق WebSocket به جای شبیهساز |
@@ -66,7 +66,7 @@ docker compose logs -f web timer-watcher
 
 ```bash
 # تنظیمات production بدون بالا آوردن سرور
-DEBUG=0 DJANGO_SECRET_KEY=test ALLOWED_HOSTS=localhost \
+DJANGO_DEBUG=0 DJANGO_SECRET_KEY=test DJANGO_ALLOWED_HOSTS=localhost \
   ROBOT_TRANSPORT_BACKEND=channels ROBOT_API_TOKEN=test-token \
   CHANNEL_LAYER_BACKEND=redis python manage.py check --deploy
 

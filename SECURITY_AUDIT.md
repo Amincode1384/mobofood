@@ -153,8 +153,8 @@ OK
 
 ## ۹. مشکلات باقی‌مانده و محدودیت‌ها
 
-- **DEBUG=1 به طور پیش‌فرض** در محیط توسعه؛ در production باید `DEBUG=0` و `DJANGO_SECRET_KEY` از متغیر محیطی تنظیم شود.
-- **ALLOWED_HOSTS='*'** به صورت پیش‌فرض؛ در production باید لیست صریح hosts تنظیم شود.
+- **Safety defaults applied**: DJANGO_DEBUG/DEBUG defaults to 0 (fail-secure), DJANGO_ALLOWED_HOSTS/ALLOWED_HOSTS defaults to localhost,127.0.0.1, and DJANGO_SECRET_KEY/SECRET_KEY has no hardcoded fallback. In explicit production (DEBUG=0), a missing key or "*" fails fast.
+- ALLOWED_HOSTS="*" is rejected in production; an explicit host list is required.
 - **روابطocket ربات (`ws/robots/<id>/`)** نیاز به `ROBOT_API_TOKEN` و `ROBOT_TRANSPORT_BACKEND=channels` دارد که در production تنظیم نشده است (fail-closed، مقصود).
 - **Channel layer InMemory** فقط یک پردازش را підтримک می‌کند؛ برای multi-worker نیاز به Redis است.
 - **ساخت تصویر Docker** در این محیط تایید نشده است (Docker نصب نیست).

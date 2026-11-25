@@ -166,8 +166,8 @@ OK
 |---|---|---|
 | `update_food` بدون دکوراتورظاهر | فقط internall استفاده می‌شود؛ در آینده `@_staff_api_required` گیرد | پایین |
 | `create_order` `@csrf_exempt` | مقصود (سفارش ناشناس QR); محافظت: امضای میز + idempotency | متناسب |
-| `DEBUG=1` پیش‌فرض در توسعه | در production `DEBUG=0` + `DJANGO_SECRET_KEY` از env | تنظیم استقرار |
-| `ALLOWED_HOSTS='*'` پیش‌فرض | در production لیست صریح hosts | تنظیم استقرار |
+| `DEBUG` default | Fail-secure default `0`; `DJANGO_SECRET_KEY` required in explicit production | applied |
+| `ALLOWED_HOSTS="*"` default | Fail-secure default localhost,127.0.0.1; "*" rejected in production | applied |
 | Channel layer InMemory | تک‌فرآندشی؛ multi-worker نیاز به Redis | مقیاس‌پذیری |
 | `ROBOT_API_TOKEN` تنظیم نشده در development | ربات实质ی بدون توکن وصل نمی‌شود (fail-closed، مقصود) | اتصال ربات gerçek |
 

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+import secrets
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -19,16 +20,41 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _env_flag(*names, default=False):
+    """خواندن پرچم بولی از محیط؛ در صورت عدم تنظیم، ``default`` برگردانده میشود."""
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None:
+            return str(value).strip().lower() not in ('0', 'false', 'no', 'off', '')
+    return default
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY: in production the key MUST come from the environment. The
-# hardcoded value below is only a local-development fallback so `manage.py
-# check` and the test suite work on a fresh checkout.
-SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-bze2os122$95nfei1d9gj-!8ooh@3!zxlb!gq37w$kutmc5sg^',
+# SECURITY: DEBUG و SECRET_KEY و ALLOWED_HOSTS همگی از محیط خوانده میشوند.
+# پیشفرضها fail-secureاند: DEBUG=false، ALLOWED_HOSTS=localhost/127.0.0.1.
+# هیچ رشتهٔ ثابتی بهعنوان کلید در کد ذخیره نمیشود: اگر کلیدی تنظیم نشده باشد،
+# یک کلید تصادفی صرفاً در حافظهٔ همان فرآیند ساخته میشود تا تستها و فرمانهای
+# محلی بالا بیایند. در استقرار صریح production (DEBUG=0 در محیط) نبود کلید
+# fail-fast است.
+_DEBUG_EXPLICITLY_SET = any(
+    name in os.environ for name in ('DJANGO_DEBUG', 'DEBUG')
 )
+DEBUG = _env_flag('DJANGO_DEBUG', 'DEBUG', default=False)
+PRODUCTION = _DEBUG_EXPLICITLY_SET and not DEBUG
+
+_SECRET_KEY_FROM_ENV = (
+    os.environ.get('DJANGO_SECRET_KEY') or os.environ.get('SECRET_KEY') or ''
+)
+
+if PRODUCTION and not _SECRET_KEY_FROM_ENV:
+    raise ImproperlyConfigured(
+        'DJANGO_SECRET_KEY (or SECRET_KEY) must be set in production '
+        '(DEBUG=0 was explicitly configured).'
+    )
+
+SECRET_KEY = _SECRET_KEY_FROM_ENV or secrets.token_urlsafe(50)
 
 
 # کلید اختصاصی «اعتبارنامهٔ پیگیری سفارش» (Order Tracking Token).
@@ -59,29 +85,27 @@ FLOOR_TOTAL_TABLES = 64
 CHANNEL_LAYER_BACKEND = os.environ.get('CHANNEL_LAYER_BACKEND', 'memory').lower()
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
 
-# This is a local/prototype deployment: DEBUG stays on by default so the
-# existing test-suite and tablet UI work out of the box. In production set
-# DEBUG=0 explicitly.
-DEBUG = os.environ.get('DEBUG', '1') not in ('0', 'false', 'False', 'no')
-
-# Comma-separated hosts in production, e.g. ALLOWED_HOSTS=example.com,www.example.com.
-# The "*" default preserves current local behaviour; set it explicitly in prod.
+# Comma-separated hosts, e.g. DJANGO_ALLOWED_HOSTS=example.com,www.example.com.
+# Prefer DJANGO_ALLOWED_HOSTS; ALLOWED_HOSTS remains supported for compatibility.
+# Development default is localhost only; in production an explicit list is
+# required and '*' is never accepted.
+_allowed_hosts_raw = (
+    os.environ.get('DJANGO_ALLOWED_HOSTS')
+    or os.environ.get('ALLOWED_HOSTS')
+    or 'localhost,127.0.0.1'
+)
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.environ.get('ALLOWED_HOSTS', '*').split(',')
+    for host in _allowed_hosts_raw.split(',')
     if host.strip()
 ]
 
-# Fail fast on a misconfigured production deployment instead of serving
-# debug pages with the committed development key or accepting every Host.
-if not DEBUG:
-    if 'DJANGO_SECRET_KEY' not in os.environ:
-        raise ImproperlyConfigured(
-            'DJANGO_SECRET_KEY must be set when DEBUG is disabled.'
-        )
+# Fail fast on an explicitly configured production deployment instead of
+# serving debug pages with every Host allowed. The key check ran above.
+if PRODUCTION:
     if '*' in ALLOWED_HOSTS:
         raise ImproperlyConfigured(
-            'ALLOWED_HOSTS must be explicit when DEBUG is disabled.'
+            'ALLOWED_HOSTS must be explicit (no "*") when DEBUG is disabled.'
         )
     if ROBOT_TRANSPORT_BACKEND == 'channels' and not ROBOT_API_TOKEN:
         raise ImproperlyConfigured(
